@@ -42,36 +42,37 @@ def plot_duplicates(all_dups):
     dup_file_pct = []
     dup_time_pct = []
 
-    for fold, dups in all_dups.items():
-        total_files = len([f for f in os.listdir(f"data/{fold}/unzips") if not f.startswith(".")])
-        dup_file_pct.append(len(dups) / total_files * 100 if total_files > 0 else 0)
+    for fold in fold_names:
+        df = create_df(fold)
+        total_files = len(df)
+        dup_file_pct.append(len(all_dups[fold]) / total_files * 100 if total_files > 0 else 0)
+        total_seconds_all = sum((group["end_date"].max() - group["start_date"].min()).total_seconds()
+                                for _, group in df.groupby("station_id"))
 
-        total_time = 0
-        overlap_time = 0
-        for _, row in dups.iterrows():
-            station_total_seconds = (row["end_dates"].iloc[-1] - row["start_dates"].iloc[0]).total_seconds()
-            total_time += station_total_seconds
-            overlap_time += -row["diffs_seconds"][row["diffs_seconds"] < 0].sum()
-        dup_time_pct.append(overlap_time / total_time * 100 if total_time > 0 else 0)
+        overlap_seconds = 0
+        for _, row in all_dups[fold].iterrows():
+            overlap_seconds += -row["diffs_seconds"][row["diffs_seconds"] < 0].sum()
+
+        dup_time_pct.append(overlap_seconds / total_seconds_all * 100 if total_seconds_all > 0 else 0)
 
     plt.figure(figsize=(10, 5))
     plt.bar(fold_names, dup_file_pct, color='steelblue')
-    plt.title("Percentage of Stations with Duplicate Time Series per Fold")
+    plt.title("Percentage of Files with Duplicate Time Series per Fold")
     plt.xlabel("Fold")
     plt.ylabel("Duplicate Files [%]")
     plt.grid(axis='y', linestyle='--', alpha=0.7)
     plt.tight_layout()
-    plt.savefig("plots/duplicate_files.png")
+    plt.savefig("plots/duplicate_files_pct.png")
     plt.close()
 
     plt.figure(figsize=(10, 5))
     plt.bar(fold_names, dup_time_pct, color='darkorange')
-    plt.title("Percentage of Duplicate Time per Fold")
+    plt.title("Percentage of Duplicate Time Relative to All Station Time per Fold")
     plt.xlabel("Fold")
     plt.ylabel("Duplicate Time [%]")
     plt.grid(axis='y', linestyle='--', alpha=0.7)
     plt.tight_layout()
-    plt.savefig("plots/duplicate_time.png")
+    plt.savefig("plots/duplicate_time_pct.png")
     plt.close()
 
 def delete_duplicates(fold, dups):
@@ -130,37 +131,37 @@ def plot_missing(total_missing):
     miss_file_pct = []
     miss_time_pct = []
 
-    for fold, miss in total_missing.items():
-        total_files = len([f for f in os.listdir(f"data/{fold}/unzips") if not f.startswith(".")])
-        miss_file_pct.append(len(miss)/total_files*100 if total_files>0 else 0)
+    for fold in fold_names:
+        df = create_df(fold)
+        total_files = len(df)
+        miss_file_pct.append(len(total_missing[fold])/total_files*100 if total_files>0 else 0)
+        total_seconds_all = sum((group["end_date"].max() - group["start_date"].min()).total_seconds()
+                                for _, group in df.groupby("station_id"))
 
-        total_seconds_fold = 0
         missing_seconds = 0
-        for _, row in miss.iterrows():
-            start_total = row["start_dates"].iloc[0]
-            end_total = row["end_dates"].iloc[-1]
-            total_seconds_fold += (end_total - start_total).total_seconds()
+        for _, row in total_missing[fold].iterrows():
             missing_seconds += row["diffs_seconds"][row["diffs_seconds"] > 86400].sum()
-        miss_time_pct.append(missing_seconds/total_seconds_fold*100 if total_seconds_fold>0 else 0)
+
+        miss_time_pct.append(missing_seconds / total_seconds_all * 100 if total_seconds_all>0 else 0)
 
     plt.figure(figsize=(10, 5))
     plt.bar(fold_names, miss_file_pct, color='steelblue')
-    plt.title("Percentage of Stations with Missing Data per Fold")
+    plt.title("Percentage of Files with Missing Data per Fold")
     plt.xlabel("Fold")
     plt.ylabel("Missing Files [%]")
     plt.grid(axis='y', linestyle='--', alpha=0.7)
     plt.tight_layout()
-    plt.savefig("plots/missing_files.png")
+    plt.savefig("plots/missing_files_pct.png")
     plt.close()
 
     plt.figure(figsize=(10, 5))
     plt.bar(fold_names, miss_time_pct, color='darkorange')
-    plt.title("Percentage of Missing Time per Fold")
+    plt.title("Percentage of Missing Time Relative to All Station Time per Fold")
     plt.xlabel("Fold")
     plt.ylabel("Missing Time [%]")
     plt.grid(axis='y', linestyle='--', alpha=0.7)
     plt.tight_layout()
-    plt.savefig("plots/missing_time.png")
+    plt.savefig("plots/missing_time_pct.png")
     plt.close()
 
 def create_missing(fold, missing):
@@ -262,12 +263,15 @@ def plot_incorrect(incorrect):
     file_pct, time_pct = [], []
 
     for fold in fold_names:
-        total_files = len([f for f in os.listdir(f"data/{fold}/unzips") if not f.startswith(".")])
+        df = create_df(fold)
+        total_files = len(df)
         fold_files = [v for v in incorrect.values() if v["metadata"]["folder"]==fold]
         file_pct.append(len(fold_files)/total_files*100 if total_files>0 else 0)
-        total_time = sum([((dt.strptime(v["end_in_file"], "%Y%m%d%H%M") - dt.strptime(v["start_in_file"], "%Y%m%d%H%M")).total_seconds()) for v in fold_files])
-        wrong_time = sum([v["wrong_minutes"]*60 for v in fold_files])
-        time_pct.append(wrong_time/total_time*100 if total_time>0 else 0)
+        total_seconds_all = sum((group["end_date"].max() - group["start_date"].min()).total_seconds()
+                                for _, group in df.groupby("station_id"))
+
+        wrong_seconds = sum([v["wrong_minutes"]*60 for v in fold_files])
+        time_pct.append(wrong_seconds / total_seconds_all * 100 if total_seconds_all>0 else 0)
 
     plt.figure(figsize=(10,5))
     plt.bar(fold_names, file_pct, color='steelblue')
@@ -276,17 +280,17 @@ def plot_incorrect(incorrect):
     plt.ylabel("Incorrect Files [%]")
     plt.grid(axis='y', linestyle='--', alpha=0.7)
     plt.tight_layout()
-    plt.savefig("plots/incorrect_files.png")
+    plt.savefig("plots/incorrect_files_pct.png")
     plt.close()
 
     plt.figure(figsize=(10,5))
     plt.bar(fold_names, time_pct, color='darkorange')
-    plt.title("Percentage of Incorrect Time per Fold")
+    plt.title("Percentage of Incorrect Time Relative to All Station Time per Fold")
     plt.xlabel("Fold")
     plt.ylabel("Incorrect Time [%]")
     plt.grid(axis='y', linestyle='--', alpha=0.7)
     plt.tight_layout()
-    plt.savefig("plots/incorrect_time.png")
+    plt.savefig("plots/incorrect_time_pct.png")
     plt.close()
 
 def resolve_incorrect(file_path, incorrect):
@@ -406,7 +410,7 @@ def concat_station_files(fold):
                     out_f.writelines(lines[1:])
         concat_counts += 1
 
-    print(f"{fold}: concatenated {concat_counts} stations")
+    print(f"{fold}: concatenated {concat_counts} files")
     return concat_counts
 
 def plot_concatenations(concat_stats):
@@ -414,19 +418,20 @@ def plot_concatenations(concat_stats):
     concat_pct = []
 
     for fold in fold_names:
-        total_stations = len(create_df(fold)["station_id"].unique())
-        concat_pct.append(concat_stats[fold] / total_stations * 100 if total_stations > 0 else 0)
+        total_files = len(create_df(fold))
+        concat_pct.append(concat_stats[fold] / total_files * 100 if total_files > 0 else 0)
 
     plt.figure(figsize=(10, 5))
     plt.bar(fold_names, concat_pct, color='green')
-    plt.title("Percentage of Concatenated Stations per Fold")
+    plt.title("Percentage of Concatenated Files per Fold")
     plt.xlabel("Fold")
-    plt.ylabel("Concatenated Stations [%]")
+    plt.ylabel("Concatenated Files [%]")
     plt.grid(axis='y', linestyle='--', alpha=0.7)
     plt.tight_layout()
-    plt.savefig("plots/concatenated_stations.png")
+    plt.savefig("plots/concatenated_files_pct.png")
     plt.close()
 
+print("starting concatenation of station files...")
 concat_stats = {}
 for fold in folds:
     count = concat_station_files(fold)
