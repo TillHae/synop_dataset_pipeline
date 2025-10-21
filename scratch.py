@@ -16,9 +16,6 @@ def create_folds(fold):
     path = Path(f"data/{fold}")
     path.mkdir(parents=True, exist_ok=True)
 
-    path = Path(f"plots/{fold}")
-    path.mkdir(parents=True, exist_ok=True)
-
 def get_names(par, fold):
     url = f"https://opendata.dwd.de/climate_environment/CDC/observations_germany/climate/10_minutes/{par}/historical/"
     page_to_scrape = requests.get(url)
@@ -132,6 +129,9 @@ if __name__ == "__main__":
 
     for fold in folds:
         create_folds(fold)
+        
+    path = Path(f"plots")
+    path.mkdir(parents=True, exist_ok=True)
     print("\nAll required directories ensured.")
 
     for par, fold in zip(pars, folds):
