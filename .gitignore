@@ -1,4 +1,9 @@
 .venv/*
+venv/*
 plots/*
 data/*
 *cache*
+*.aux
+*.log
+*.out
+notes.md
