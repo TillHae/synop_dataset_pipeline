@@ -36,7 +36,7 @@ def plot_station_duration(total_year_counts):
     max_duration = max(max(yc.index) for yc in total_year_counts.values()) 
     plt.xticks(range(0, max_duration + 1))
     plt.tight_layout()
-    plt.savefig("plots/station_durations_fixed.png")
+    plt.savefig("plots/station_durations.png")
     plt.close()
 
 print("--- Create Station Duration Plot ---")
