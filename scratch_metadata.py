@@ -1,7 +1,6 @@
 import requests
 import os
 import json
-import matplotlib.pyplot as plt
 
 from bs4 import BeautifulSoup
 from pathlib import Path
@@ -23,9 +22,6 @@ def get_names(par, fold):
         if link.get("href") and link.get("href").endswith(".zip")
     ]
 
-    with open(f"data/metadata/names.txt", "w") as f:
-        f.write("\n".join(file_names))
-
     print(f"Got names for {fold}!")
     return file_names
 
@@ -46,7 +42,7 @@ def get_zips(par, fold):
 
     print(f"Got files for {fold}!")
 
-def extract_zips(fold):
+def extract_zips():
     zip_folder = f"data/metadata/zips"
     unzip_folder = f"data/metadata/unzips"
 
@@ -60,12 +56,12 @@ def extract_zips(fold):
             if not os.path.exists(path):
                 zip_ref.extract(file, unzip_folder)
 
-    print(f"Unzipped metadata for {fold}!")
+    print(f"Unzipped metadata!")
 
 if __name__ == "__main__":
     print("---------- Starting Metadata Scraping Workflow ----------")
         
-    path = Path(f"plots")
+    path = Path(f"data/metadata")
     path.mkdir(parents=True, exist_ok=True)
     print("\nAll required directories ensured.")
 
@@ -77,7 +73,6 @@ if __name__ == "__main__":
         get_zips(par, fold)
 
     print("\nStarting file extraction.")
-    for fold in folds:
-        extract_zips(fold)
+    extract_zips()
     
     print("\n---------- Workflow Complete ----------")
