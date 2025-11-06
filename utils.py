@@ -35,7 +35,7 @@ def create_air_temp(fold, start_date, end_date, station_id):
     date = start_date
     delta = pd.Timedelta(minutes=10)
     while date < end_date:
-        content += f"{station_id.rjust(11)};{date.strftime('%Y%m%d%H%M')};    /;     /;   /;eor\n"
+        content += f"{station_id.rjust(11)};{date.strftime('%Y%m%d%H%M')}; -999;  -999;-999;eor\n"
         date += delta
 
     with open(name, "a") as f:
@@ -48,7 +48,7 @@ def create_ex_temp(fold, start_date, end_date, station_id):
     date = start_date
     delta = pd.Timedelta(minutes=10)
     while date < end_date:
-        content += f"{station_id.rjust(11)};{date.strftime('%Y%m%d%H%M')};    /;     /;     /;     /;     /\n"
+        content += f"{station_id.rjust(11)};{date.strftime('%Y%m%d%H%M')}; -999;  -999;  -999;  -999;  -999\n"
         date += delta
 
     with open(name, "a") as f:
@@ -61,7 +61,7 @@ def create_ex_wind(fold, start_date, end_date, station_id):
     date = start_date
     delta = pd.Timedelta(minutes=10)
     while date < end_date:
-        content += f"{station_id.rjust(11)};{date.strftime('%Y%m%d%H%M')};    /;     /;     /;     /;   /\n"
+        content += f"{station_id.rjust(11)};{date.strftime('%Y%m%d%H%M')}; -999;  -999;  -999;  -999;-999\n"
         date += delta
 
     with open(name, "a") as f:
@@ -74,7 +74,7 @@ def create_precip(fold, start_date, end_date, station_id):
     date = start_date
     delta = pd.Timedelta(minutes=10)
     while date < end_date:
-        content += f"{station_id.rjust(11)};{date.strftime('%Y%m%d%H%M')};    /;   /;     /; /\n"
+        content += f"{station_id.rjust(11)};{date.strftime('%Y%m%d%H%M')}; -999;-999;  -999;-999\n"
         date += delta
 
     with open(name, "a") as f:
@@ -87,7 +87,7 @@ def create_solar(fold, start_date, end_date, station_id):
     date = start_date
     delta = pd.Timedelta(minutes=10)
     while date < end_date:
-        content += f"{station_id.rjust(11)};{date.strftime('%Y%m%d%H%M')};    /;     /;     /;       /;   /\n"
+        content += f"{station_id.rjust(11)};{date.strftime('%Y%m%d%H%M')}; -999;  -999;  -999;    -999;-999\n"
         date += delta
 
     with open(name, "a") as f:
@@ -100,7 +100,7 @@ def create_wind(fold, start_date, end_date, station_id):
     date = start_date
     delta = pd.Timedelta(minutes=10)
     while date < end_date:
-        content += f"{station_id.rjust(11)};{date.strftime('%Y%m%d%H%M')};    /;     /;   /;eor\n"
+        content += f"{station_id.rjust(11)};{date.strftime('%Y%m%d%H%M')}; -999;  -999;-999;eor\n"
         date += delta
 
     with open(name, "a") as f:

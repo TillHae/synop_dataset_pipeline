@@ -325,7 +325,7 @@ def resolve_incorrect(file_path, incorrect):
             new_time_str = new_dt.strftime("%Y%m%d%H%M")
             line_fields = [incorrect["metadata"]["station_id"].rjust(col_widths[0]), new_time_str.rjust(col_widths[1])]
             for w in col_widths[2:]:
-                line_fields.append("/".rjust(w))
+                line_fields.append("-999".rjust(w))
                 
             new_line = ";".join(line_fields) + "\n"
             new_data_lines.append(new_line)
@@ -344,7 +344,7 @@ def resolve_incorrect(file_path, incorrect):
             new_time_str = new_dt.strftime("%Y%m%d%H%M")
             line_fields = [incorrect["metadata"]["station_id"].rjust(col_widths[0]), new_time_str.rjust(col_widths[1])]
             for w in col_widths[2:]:
-                line_fields.append("/".rjust(w))
+                line_fields.append("-999".rjust(w))
                 
             new_line = ";".join(line_fields) + "\n"
             data_lines.append(new_line)
