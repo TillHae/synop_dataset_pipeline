@@ -190,6 +190,30 @@ plot_missing(total_missing)
 
 # fix incorrect file content
 
+def find_incorrect_data(file):
+    df = pd.read_csv(
+        file,
+        sep=';',
+        header=0,
+        usecols=["MESS_DATUM"],
+    )
+    
+    df['time'] = pd.to_datetime(df['MESS_DATUM'], format='%Y%m%d%H%M')
+    df.drop(columns=['MESS_DATUM'], inplace=True) 
+    df['delta'] = df['time'].diff()
+
+    df_to_check = df.iloc[1:]
+    missing_intervals = df_to_check[df_to_check['delta'] != expected_delta].copy()
+    if missing_intervals.empty:
+        return {}
+    
+    print(f"Found {len(missing_intervals)} missing or incorrect intervals for {file}.")
+
+    results_df = missing_intervals.rename(columns={'time': 'end_time'})
+    total_deltas = results_df['delta'].sum()
+    
+    return results_df, total_deltas
+
 def check_content(fold):
     incorrect = {}
     unzip_folder = f"data/{fold}/unzips"
@@ -226,14 +250,18 @@ def check_content(fold):
 
         date_range_ok = (start_dt.date() == file_start.date()) and (end_dt.date() == file_end.date())
 
-        if not (start_ok and end_ok and date_range_ok):
+        intermediate, total_deltas = find_incorrect_data(f)
+        total_deltas = total_deltas.to_pydatetime()
+
+        if not (start_ok and end_ok and date_range_ok) or intermediate:
             missing_at_start = (start_dt - expected_start_dt).total_seconds() / 60
+            missing_intermediate = total_deltas.total_seconds() / 60
             missing_at_end = (expected_end_dt - end_dt).total_seconds() / 60
             
-            length_minutes = (end_dt - start_dt).total_seconds() / 60
+            length_minutes = (end_dt - start_dt - total_deltas).total_seconds() / 60
             expected_length_minutes = ((file_end - file_start).total_seconds() / 60) + 24 * 60 - 10
             missing_minutes = expected_length_minutes - length_minutes
-            wrong_minutes = abs(missing_at_start) + abs(missing_at_end)
+            wrong_minutes = abs(missing_at_start) + abs(missing_at_end) + missing_intermediate
 
             incorrect[f] = {
                 "start_in_file": start_dt.strftime("%Y%m%d%H%M"),
@@ -249,6 +277,8 @@ def check_content(fold):
                 "missing_end": missing_at_end,
                 "missing_minutes": missing_minutes,
                 "wrong_minutes": wrong_minutes,
+                "intermediate_info": intermediate,
+                "missing_intermediate": missing_intermediate,
                 "metadata": {
                     "folder": fold,
                     "station_id": station_id
@@ -302,28 +332,64 @@ def resolve_incorrect(file_path, incorrect):
 
     cols = header.rstrip("\n").split(";")
     col_widths = [len(col) for col in cols]
-
+    
+    station_id = incorrect["metadata"]["station_id"]
+    
     n_lines_start = int(incorrect["missing_start"] / 10)
     n_lines_end = int(incorrect["missing_end"] / 10)
-
+    
     if n_lines_start < 0:
         data_lines = data_lines[-n_lines_start:]
     
     if n_lines_end < 0:
         data_lines = data_lines[:n_lines_end]
 
-    if n_lines_start > 0:
-        if not data_lines:
-            print(f"File {file_path} has no data to extend!")    # Should only occur when file is empty to beginn with
-            return
+    intermediate_info = incorrect["intermediate_info"]
+    if intermediate_info:
+        for gap in reversed(intermediate_info):
+            gap_start_dt = dt.strptime(gap["start_time"], "%Y-%m-%d %H:%M:%S")
+            gap_end_dt = dt.strptime(gap["end_time"], "%Y-%m-%d %H:%M:%S")
+            lines_to_insert = int(gap["delta"].total_seconds() / 600) - 1
+            
+            end_time_str_check = gap_end_dt.strftime("%Y%m%d%H%M")
+            insert_index = -1
+            
+            for idx, line in enumerate(data_lines):
+                line_time_str = line.split(";")[1].strip() 
+                if line_time_str == end_time_str_check:
+                    insert_index = idx
+                    break
 
+            if insert_index != -1:
+                new_lines = []
+                current_dt = gap_start_dt
+                
+                for _ in range(lines_to_insert):
+                    current_dt += timedelta(minutes=10)
+                    new_time_str = current_dt.strftime("%Y%m%d%H%M")
+                    
+                    line_fields = [station_id.rjust(col_widths[0]), new_time_str.rjust(col_widths[1])]
+                    for w in col_widths[2:]:
+                        line_fields.append("-999".rjust(w))
+                        
+                    new_line = ";".join(line_fields) + "\n"
+                    new_lines.append(new_line)
+                
+                data_lines[insert_index:insert_index] = new_lines
+
+    if n_lines_start > 0:
+        if not data_lines and header: # Should only occur when file is empty to beginn with
+            start_dt = dt.strptime(incorrect["expected_start"], "%Y%m%d%H%M")
+        else:
+            start_dt = dt.strptime(incorrect["start_in_file"], "%Y%m%d%H%M")
+        
         new_data_lines = []
-        start_dt = dt.strptime(incorrect["start_in_file"], "%Y%m%d%H%M")
         
         for i in range(n_lines_start, 0, -1):
             new_dt = start_dt - timedelta(minutes=10 * i)
             new_time_str = new_dt.strftime("%Y%m%d%H%M")
-            line_fields = [incorrect["metadata"]["station_id"].rjust(col_widths[0]), new_time_str.rjust(col_widths[1])]
+            
+            line_fields = [station_id.rjust(col_widths[0]), new_time_str.rjust(col_widths[1])]
             for w in col_widths[2:]:
                 line_fields.append("-999".rjust(w))
                 
@@ -333,16 +399,16 @@ def resolve_incorrect(file_path, incorrect):
         data_lines = new_data_lines + data_lines
 
     if n_lines_end > 0:
-        if not data_lines:
-            print(f"File {file_path} has no data to extend!")    # Should only occur when file is empty to beginn with
-            return
-
-        end_dt = dt.strptime(incorrect["end_in_file"], "%Y%m%d%H%M")
+        if not data_lines and header: # Should only occur when file is empty to beginn with
+            end_dt = dt.strptime(incorrect["expected_start"], "%Y%m%d%H%M") 
+        else:
+            end_dt = dt.strptime(incorrect["end_in_file"], "%Y%m%d%H%M")
         
         for i in range(1, n_lines_end + 1):
             new_dt = end_dt + timedelta(minutes=10 * i)
             new_time_str = new_dt.strftime("%Y%m%d%H%M")
-            line_fields = [incorrect["metadata"]["station_id"].rjust(col_widths[0]), new_time_str.rjust(col_widths[1])]
+            
+            line_fields = [station_id.rjust(col_widths[0]), new_time_str.rjust(col_widths[1])]
             for w in col_widths[2:]:
                 line_fields.append("-999".rjust(w))
                 
@@ -353,7 +419,7 @@ def resolve_incorrect(file_path, incorrect):
         f.write(header)
         f.writelines(data_lines)
 
-    print(f"Fixed {file_path}: {'removed' if incorrect["missing_minutes"] < 0 else 'added'} {incorrect["wrong_minutes"]} lines.")
+    print(f"Fixed {file_path}: Corrected {len(data_lines)} data lines. Total error was {incorrect['wrong_minutes']:.2f} minutes.")
 
     return incorrect["wrong_minutes"]
 
