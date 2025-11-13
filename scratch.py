@@ -50,16 +50,19 @@ def get_zips(par, fold):
 
     print(f"Got files for {fold}!")
 
+def extract_zip(zip_path, unzip_folder):
+    with ZipFile(zip_path, 'r') as zip_ref:
+        zip_ref.extractall(unzip_folder)
+
 def extract_zips(fold):
     zip_folder = f"data/{fold}/zips"
     unzip_folder = f"data/{fold}/unzips"
-
     os.makedirs(unzip_folder, exist_ok=True)
 
-    for f in os.listdir(zip_folder):
-        zip_path = os.path.join(zip_folder, f)
-        with ZipFile(zip_path, 'r') as zip_ref:
-            zip_ref.extractall(unzip_folder)
+    zip_files = [(os.path.join(zip_folder, f), unzip_folder) for f in os.listdir(zip_folder) if f.endswith(".zip")]
+    workers = min(len(zip_files), int(cpu_count() * 0.9))
+    with Pool(workers) as pool:
+        pool.starmap(extract_zip, zip_files)
 
     print(f"Unzipped files for {fold}!")
 
