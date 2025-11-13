@@ -1,5 +1,7 @@
 import os
+from multiprocessing import Pool, cpu_count
 import re
+import pickle
 from datetime import datetime as dt, timedelta, time
 
 import pandas as pd
@@ -197,6 +199,8 @@ def find_incorrect_data(file):
         header=0,
         usecols=["MESS_DATUM"],
     )
+
+    expected_delta = pd.Timedelta(minutes=10)
     
     df['time'] = pd.to_datetime(df['MESS_DATUM'], format='%Y%m%d%H%M')
     df.drop(columns=['MESS_DATUM'], inplace=True) 
@@ -205,7 +209,9 @@ def find_incorrect_data(file):
     df_to_check = df.iloc[1:]
     missing_intervals = df_to_check[df_to_check['delta'] != expected_delta].copy()
     if missing_intervals.empty:
-        return {}
+        results_df = pd.DataFrame()
+        total_deltas = pd.Timedelta(seconds=0)
+        return pd.DataFrame(), total_deltas
     
     print(f"Found {len(missing_intervals)} missing or incorrect intervals for {file}.")
 
@@ -214,76 +220,86 @@ def find_incorrect_data(file):
     
     return results_df, total_deltas
 
+def process_file_check(f):
+    if f.startswith(".") or not os.path.isfile(f"{unzip_folder}/{f}"):
+        continue
+
+    file_path = f"{unzip_folder}/{f}"
+    with open(file_path, "rb") as station:
+        first_line = station.readline()
+        second_line = station.readline().rstrip(b"\n").decode()
+
+        station.seek(-1024, 2)
+        last_line = station.read().splitlines()[-1].decode()
+
+    station_id = second_line[:11].strip()
+    start_str = second_line[12:24]
+    end_str = last_line[12:24]
+
+    start_dt = dt.strptime(start_str, "%Y%m%d%H%M")
+    end_dt = dt.strptime(end_str, "%Y%m%d%H%M")
+
+    start_ok = start_dt.hour == 0 and start_dt.minute == 0
+    end_ok = end_dt.hour == 23 and end_dt.minute == 50
+
+    parts = f.split("_")
+    file_start = dt.strptime(parts[-3], "%Y%m%d")
+    file_end = dt.strptime(parts[-2], "%Y%m%d")
+
+    expected_start_dt = dt.combine(file_start.date(), time(hour=0, minute=0))
+    expected_end_dt = dt.combine(file_end.date(), time(hour=23, minute=50))
+
+    date_range_ok = (start_dt.date() == file_start.date()) and (end_dt.date() == file_end.date())
+
+    intermediate, total_deltas = find_incorrect_data(file_path)
+    total_deltas = total_deltas.to_pytimedelta()
+
+    if not (start_ok and end_ok and date_range_ok) or total_deltas:
+        missing_at_start = (start_dt - expected_start_dt).total_seconds() / 60
+        missing_intermediate = total_deltas.total_seconds() / 60
+        missing_at_end = (expected_end_dt - end_dt).total_seconds() / 60
+        
+        length_minutes = (end_dt - start_dt - total_deltas).total_seconds() / 60
+        expected_length_minutes = ((file_end - file_start).total_seconds() / 60) + 24 * 60 - 10
+        missing_minutes = expected_length_minutes - length_minutes
+        wrong_minutes = abs(missing_at_start) + abs(missing_at_end) + missing_intermediate
+
+        return {f: {
+            "start_in_file": start_dt.strftime("%Y%m%d%H%M"),
+            "end_in_file": end_dt.strftime("%Y%m%d%H%M"),
+            "expected_start": file_start.strftime("%Y%m%d0000"),
+            "expected_end": file_end.strftime("%Y%m%d2350"),
+            "start_ok": start_ok,
+            "end_ok": end_ok,
+            "date_range_ok": date_range_ok,
+            "length_minutes": length_minutes,
+            "expected_length_minutes": expected_length_minutes,
+            "missing_start": missing_at_start,
+            "missing_end": missing_at_end,
+            "missing_minutes": missing_minutes,
+            "wrong_minutes": wrong_minutes,
+            "intermediate_info": intermediate,
+            "missing_intermediate": missing_intermediate,
+            "metadata": {
+                "folder": fold,
+                "station_id": station_id
+            }}
+        }
+    else:
+        return {}
+
 def check_content(fold):
     incorrect = {}
     unzip_folder = f"data/{fold}/unzips"
     print(f"{fold} has {len(os.listdir(unzip_folder))} files")
 
-    for f in os.listdir(unzip_folder):
-        if f.startswith(".") or not os.path.isfile(f"{unzip_folder}/{f}"):
-            continue
+    num_workers = min(32, cpu_count())
+    jobs = os.listdir(unzip_folder)
+    with Pool(num_workers) as pool:
+        results = pool.map(process_file_check, jobs)
 
-        file_path = f"{unzip_folder}/{f}"
-        with open(file_path, "rb") as station:
-            first_line = station.readline()
-            second_line = station.readline().rstrip(b"\n").decode()
-
-            station.seek(-1024, 2)
-            last_line = station.read().splitlines()[-1].decode()
-
-        station_id = second_line[:11].strip()
-        start_str = second_line[12:24]
-        end_str = last_line[12:24]
-
-        start_dt = dt.strptime(start_str, "%Y%m%d%H%M")
-        end_dt = dt.strptime(end_str, "%Y%m%d%H%M")
-
-        start_ok = start_dt.hour == 0 and start_dt.minute == 0
-        end_ok = end_dt.hour == 23 and end_dt.minute == 50
-
-        parts = f.split("_")
-        file_start = dt.strptime(parts[-3], "%Y%m%d")
-        file_end = dt.strptime(parts[-2], "%Y%m%d")
-
-        expected_start_dt = dt.combine(file_start.date(), time(hour=0, minute=0))
-        expected_end_dt = dt.combine(file_end.date(), time(hour=23, minute=50))
-
-        date_range_ok = (start_dt.date() == file_start.date()) and (end_dt.date() == file_end.date())
-
-        intermediate, total_deltas = find_incorrect_data(f)
-        total_deltas = total_deltas.to_pydatetime()
-
-        if not (start_ok and end_ok and date_range_ok) or intermediate:
-            missing_at_start = (start_dt - expected_start_dt).total_seconds() / 60
-            missing_intermediate = total_deltas.total_seconds() / 60
-            missing_at_end = (expected_end_dt - end_dt).total_seconds() / 60
-            
-            length_minutes = (end_dt - start_dt - total_deltas).total_seconds() / 60
-            expected_length_minutes = ((file_end - file_start).total_seconds() / 60) + 24 * 60 - 10
-            missing_minutes = expected_length_minutes - length_minutes
-            wrong_minutes = abs(missing_at_start) + abs(missing_at_end) + missing_intermediate
-
-            incorrect[f] = {
-                "start_in_file": start_dt.strftime("%Y%m%d%H%M"),
-                "end_in_file": end_dt.strftime("%Y%m%d%H%M"),
-                "expected_start": file_start.strftime("%Y%m%d0000"),
-                "expected_end": file_end.strftime("%Y%m%d2350"),
-                "start_ok": start_ok,
-                "end_ok": end_ok,
-                "date_range_ok": date_range_ok,
-                "length_minutes": length_minutes,
-                "expected_length_minutes": expected_length_minutes,
-                "missing_start": missing_at_start,
-                "missing_end": missing_at_end,
-                "missing_minutes": missing_minutes,
-                "wrong_minutes": wrong_minutes,
-                "intermediate_info": intermediate,
-                "missing_intermediate": missing_intermediate,
-                "metadata": {
-                    "folder": fold,
-                    "station_id": station_id
-                }
-            }
+    for res in results:
+        incorrect.update(res)
 
     print(f"{len(incorrect)} file(s) with incorrect values for {fold}!")
     return incorrect
@@ -345,10 +361,11 @@ def resolve_incorrect(file_path, incorrect):
         data_lines = data_lines[:n_lines_end]
 
     intermediate_info = incorrect["intermediate_info"]
-    if intermediate_info:
-        for gap in reversed(intermediate_info):
-            gap_start_dt = dt.strptime(gap["start_time"], "%Y-%m-%d %H:%M:%S")
-            gap_end_dt = dt.strptime(gap["end_time"], "%Y-%m-%d %H:%M:%S")
+    if not intermediate_info.empty:
+        gaps_list = list(intermediate_info.iterrows())
+        for index, gap in reversed(gaps_list):
+            gap_start_dt = gap["end_time"] - gap["delta"]
+            gap_end_dt = gap["end_time"]
             lines_to_insert = int(gap["delta"].total_seconds() / 600) - 1
             
             end_time_str_check = gap_end_dt.strftime("%Y%m%d%H%M")
@@ -423,12 +440,23 @@ def resolve_incorrect(file_path, incorrect):
 
     return incorrect["wrong_minutes"]
 
+def resolve_incorrect_wrapper(args):
+    file_path, incorrect_data = args
+    return resolve_incorrect(file_path, incorrect_data)
+
 def process_incorrect(incorrect):
     total_files, total_minutes = 0, 0
-    for filename, values in incorrect.items():
-        file_path = f"data/{values["metadata"]["folder"]}/unzips/{filename}"
-        total_minutes += resolve_incorrect(file_path, values)
-        total_files += 1
+
+    num_workers = min(32, cpu_count())
+    jobs = [
+        (f"data/{values['metadata']['folder']}/unzips/{filename}", values)
+        for filename, values in incorrect.items()
+    ]
+    with Pool(num_workers) as pool:
+        results = pool.map(resolve_incorrect_wrapper, jobs)
+
+    total_minutes = sum(results)
+    total_files = len(results)
 
     print(f"Fixed {total_minutes} minutes in {total_files} files")
 
@@ -437,6 +465,12 @@ print("starting incorrect check")
 for fold in folds:
     incorrect.update(check_content(fold))
     print(f"finished {fold}")
+
+with open("incorrect.pkl", "wb") as f:
+    pickle.dump(incorrect, f)
+
+#with open("incorrect.pkl", "rb") as f:
+    #incorrect = pickle.load(f)
 
 print("starting incorrect resolve")
 process_incorrect(incorrect)
