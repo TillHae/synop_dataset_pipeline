@@ -481,6 +481,20 @@ plot_incorrect(incorrect)
 
 # concat files from same station
 
+def concat_station(station_id_files, unzip_folder, concatenated_folder):
+    station_id, files = station_id_files
+    files_sorted = sorted(files, key=lambda x: x.split("_")[-3])
+    output_file = f"{concatenated_folder}/{station_id}.txt"
+
+    with open(output_file, "w") as out_f:
+        for i, f in enumerate(files_sorted):
+            with open(f"{unzip_folder}/{f}", "r") as in_f:
+                lines = in_f.readlines()
+                if i == 0:
+                    out_f.write(lines[0])
+
+                out_f.writelines(lines[1:])
+
 def concat_station_files(fold):
     unzip_folder = f"data/{fold}/unzips"
     concatenated_folder = f"data/{fold}/concatenated"
@@ -495,21 +509,12 @@ def concat_station_files(fold):
         station_id = parts[-1].split(".")[0]
         station_files.setdefault(station_id, []).append(f)
 
-    concat_counts = 0
-    for station_id, files in station_files.items():
-        files_sorted = sorted(files, key=lambda x: x.split("_")[-3])
-        output_file = f"{concatenated_folder}/{station_id}.txt"
+    station_items = list(station_files.items())
+    workers = min(len(station_items), int(cpu_count() * 0.9))
+    with Pool(workers) as pool:
+        pool.starmap(concat_station, [(item, unzip_folder, concatenated_folder) for item in station_items])
 
-        with open(output_file, "w") as out_f:
-            for i, f in enumerate(files_sorted):
-                with open(f"{unzip_folder}/{f}", "r") as in_f:
-                    lines = in_f.readlines()
-                    if i == 0:
-                        out_f.write(lines[0])
-
-                    out_f.writelines(lines[1:])
-        concat_counts += 1
-
+    concat_counts = len(station_files.keys())
     print(f"{fold}: concatenated {concat_counts} files")
     return concat_counts
 
