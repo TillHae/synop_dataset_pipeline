@@ -89,7 +89,7 @@ def delete_duplicates(fold, dups):
                     to_delete.append(f"data/{fold}/unzips/*_{station['start_dates'][i - 1].strftime('%Y%m%d')}_{station['end_dates'][i - 1].strftime('%Y%m%d')}_{station['station_id']}.txt")
 
     for f in to_delete:
-        os.system(f"rm {f}")
+        os.remove(f)
 
     print(f"{fold} done!")
 
@@ -220,9 +220,9 @@ def find_incorrect_data(file):
     
     return results_df, total_deltas
 
-def process_file_check(f):
+def process_file_check(f, unzip_folder):
     if f.startswith(".") or not os.path.isfile(f"{unzip_folder}/{f}"):
-        continue
+        return {}
 
     file_path = f"{unzip_folder}/{f}"
     with open(file_path, "rb") as station:
@@ -294,9 +294,9 @@ def check_content(fold):
     print(f"{fold} has {len(os.listdir(unzip_folder))} files")
 
     num_workers = min(32, cpu_count())
-    jobs = os.listdir(unzip_folder)
+    jobs = [[f, unzip_folder] for f in os.listdir(unzip_folder)]
     with Pool(num_workers) as pool:
-        results = pool.map(process_file_check, jobs)
+        results = pool.starmap(process_file_check, jobs)
 
     for res in results:
         incorrect.update(res)

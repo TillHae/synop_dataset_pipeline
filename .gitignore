@@ -1,3 +1,4 @@
+.vscode
 .venv/*
 venv/*
 
@@ -14,3 +15,4 @@ data/*
 
 notes.md
 test.py
+paper
