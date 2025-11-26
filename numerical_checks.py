@@ -3,6 +3,8 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
+import matplotlib.pyplot as plt
+import os
 
 
 class NumericalChecker:
@@ -35,7 +37,7 @@ class NumericalChecker:
             # Germany: Extreme events can reach 50-100mm in 10 minutes
             'RWS_10': (0, 100),   # Precipitation amount in 10-min interval
             'RWS_DAU_10': (0, 10), # Precipitation duration (seconds, max 10 min)
-            'RWS_IND_10': (0, 1),   # Precipitation indicator (0=no, 1=yes)
+            'RWS_IND_10': (0, 3),   # Precipitation indicator (0=no, 1=yes, 2,3=older_versions with heating)
             
             # Solar radiation (J/cm²)
             # Germany latitude: ~47-55°N, moderate solar radiation
@@ -312,6 +314,179 @@ class NumericalChecker:
         
         print("\n" + "="*80)
     
+    def create_plots(self, output_dir: str = "plots/v2"):
+        if not self.results:
+            print("No results available. Run check_dataset() first.")
+            return
+        
+        os.makedirs(output_dir, exist_ok=True)
+        print(f"\nGenerating plots in {output_dir}/...")
+        
+        self.plot_completeness_heatmap(output_dir)
+        self.plot_nan_percentages(output_dir)
+        self.plot_outlier_distribution(output_dir)
+        self.plot_range_violations(output_dir)
+        
+        print(f"All plots saved to {output_dir}/")
+    
+    def plot_completeness_heatmap(self, output_dir: str):
+        completeness_data = {}
+        
+        for filename, file_results in self.results.items():
+            if 'error' in file_results:
+                continue
+            
+            for var_name, var_results in file_results['variables'].items():
+                if not var_results.get('nan_inf_check'):
+                    continue
+                
+                nan_pct = var_results['nan_inf_check']['nan_percentage']
+                completeness_pct = 100 - nan_pct
+                
+                if var_name not in completeness_data:
+                    completeness_data[var_name] = []
+                completeness_data[var_name].append(completeness_pct)
+        
+        if not completeness_data:
+            return
+        
+        avg_completeness = {var: np.mean(vals) for var, vals in completeness_data.items()}
+        
+        plt.figure(figsize=(12, 6))
+        vars_sorted = sorted(avg_completeness.keys(), key=lambda x: avg_completeness[x])
+        values = [avg_completeness[v] for v in vars_sorted]
+        colors = ['#d73027' if v < 80 else '#fee08b' if v < 95 else '#1a9850' for v in values]
+        
+        plt.barh(vars_sorted, values, color=colors)
+        plt.xlabel('Data Completeness (%)', fontsize=12)
+        plt.ylabel('Variable', fontsize=12)
+        plt.title('Data Completeness by Variable (Average Across All Files)', fontsize=14, fontweight='bold')
+        plt.xlim(0, 100)
+        plt.grid(axis='x', linestyle='--', alpha=0.3)
+        plt.tight_layout()
+        plt.savefig(f"{output_dir}/completeness_by_variable.png", dpi=300)
+        plt.close()
+        print(f"  Saved completeness_by_variable.png")
+    
+    def plot_nan_percentages(self, output_dir: str):
+        nan_data = {}
+        
+        for filename, file_results in self.results.items():
+            if 'error' in file_results:
+                continue
+            
+            for var_name, var_results in file_results['variables'].items():
+                if not var_results.get('nan_inf_check'):
+                    continue
+                
+                nan_pct = var_results['nan_inf_check']['nan_percentage']
+                
+                if var_name not in nan_data:
+                    nan_data[var_name] = []
+                nan_data[var_name].append(nan_pct)
+        
+        if not nan_data:
+            return
+        
+        avg_nan = {var: np.mean(vals) for var, vals in nan_data.items()}
+        
+        plt.figure(figsize=(12, 6))
+        vars_sorted = sorted(avg_nan.keys(), key=lambda x: avg_nan[x], reverse=True)
+        values = [avg_nan[v] for v in vars_sorted]
+        
+        plt.bar(range(len(vars_sorted)), values, color='steelblue')
+        plt.xticks(range(len(vars_sorted)), vars_sorted, rotation=45, ha='right')
+        plt.xlabel('Variable', fontsize=12)
+        plt.ylabel('Missing Data (%)', fontsize=12)
+        plt.title('Missing Data (NaN) Percentage by Variable', fontsize=14, fontweight='bold')
+        plt.grid(axis='y', linestyle='--', alpha=0.3)
+        plt.tight_layout()
+        plt.savefig(f"{output_dir}/nan_percentages.png", dpi=300)
+        plt.close()
+        print(f"  Saved nan_percentages.png")
+    
+    def plot_outlier_distribution(self, output_dir: str):
+        outlier_data = {}
+        
+        for filename, file_results in self.results.items():
+            if 'error' in file_results:
+                continue
+            
+            for var_name, var_results in file_results['variables'].items():
+                if not var_results.get('outlier_check') or not var_results['outlier_check'].get('outliers_detected'):
+                    continue
+                
+                outlier_pct = var_results['outlier_check'].get('outlier_percentage', 0)
+                
+                if var_name not in outlier_data:
+                    outlier_data[var_name] = []
+                outlier_data[var_name].append(outlier_pct)
+        
+        if not outlier_data:
+            print("  No outlier data to plot")
+            return
+        
+        avg_outliers = {var: np.mean(vals) for var, vals in outlier_data.items()}
+        
+        plt.figure(figsize=(12, 6))
+        vars_sorted = sorted(avg_outliers.keys(), key=lambda x: avg_outliers[x], reverse=True)
+        values = [avg_outliers[v] for v in vars_sorted]
+        
+        plt.bar(range(len(vars_sorted)), values, color='darkorange')
+        plt.xticks(range(len(vars_sorted)), vars_sorted, rotation=45, ha='right')
+        plt.xlabel('Variable', fontsize=12)
+        plt.ylabel('Statistical Outliers (%)', fontsize=12)
+        plt.title('Statistical Outlier Detection (Z-score > 3)', fontsize=14, fontweight='bold')
+        plt.grid(axis='y', linestyle='--', alpha=0.3)
+        plt.tight_layout()
+        plt.savefig(f"{output_dir}/outlier_distribution.png", dpi=300)
+        plt.close()
+        print(f"  Saved outlier_distribution.png")
+    
+    def plot_range_violations(self, output_dir: str):
+        violation_data = {}
+        
+        for filename, file_results in self.results.items():
+            if 'error' in file_results:
+                continue
+            
+            for var_name, var_results in file_results['variables'].items():
+                if not var_results.get('range_check') or not var_results['range_check'].get('range_defined'):
+                    continue
+                
+                rc = var_results['range_check']
+                if 'below_min' in rc and 'above_max' in rc:
+                    total_violations = rc['below_min'] + rc['above_max']
+                    total_values = rc.get('in_range', 0) + total_violations
+                    
+                    if total_values > 0:
+                        violation_pct = (total_violations / total_values) * 100
+                        
+                        if var_name not in violation_data:
+                            violation_data[var_name] = []
+                        violation_data[var_name].append(violation_pct)
+        
+        if not violation_data:
+            print("  No range violation data to plot")
+            return
+        
+        avg_violations = {var: np.mean(vals) for var, vals in violation_data.items()}
+        
+        plt.figure(figsize=(12, 6))
+        vars_sorted = sorted(avg_violations.keys(), key=lambda x: avg_violations[x], reverse=True)
+        values = [avg_violations[v] for v in vars_sorted]
+        
+        plt.bar(range(len(vars_sorted)), values, color='#d73027')
+        plt.xticks(range(len(vars_sorted)), vars_sorted, rotation=45, ha='right')
+        plt.xlabel('Variable', fontsize=12)
+        plt.ylabel('Out-of-Range Values (%)', fontsize=12)
+        plt.title('Physical Range Violations by Variable', fontsize=14, fontweight='bold')
+        plt.grid(axis='y', linestyle='--', alpha=0.3)
+        plt.tight_layout()
+        plt.savefig(f"{output_dir}/range_violations.png", dpi=300)
+        plt.close()
+        print(f"  Saved range_violations.png")
+    
     def save_report(self, output_path: str = "numerical_checks_report.txt"):
         with open(output_path, 'w') as f:
             f.write("NUMERICAL CHECKS DETAILED REPORT\n")
@@ -555,6 +730,42 @@ class NumericalApplier:
                 f.write(f"    Removed: {total_removed:,} ({overall_pct:.2f}%)\n")
         
         print(f"\nCleaning summary saved to: {output_path}")
+    
+    def plot_cleaning_impact(self, output_dir: str = "plots/v2"):
+        if not self.cleaning_stats:
+            print("No cleaning statistics available.")
+            return
+        
+        os.makedirs(output_dir, exist_ok=True)
+        
+        var_stats = {}
+        for filename, stats in self.cleaning_stats.items():
+            for var_name, var_data in stats.items():
+                if var_name not in var_stats:
+                    var_stats[var_name] = {'removed': 0, 'original': 0}
+                var_stats[var_name]['removed'] += var_data['removed']
+                var_stats[var_name]['original'] += var_data['original_valid']
+        
+        var_percentages = {
+            var: (data['removed'] / data['original'] * 100) if data['original'] > 0 else 0
+            for var, data in var_stats.items()
+        }
+        
+        vars_sorted = sorted(var_percentages.keys(), key=lambda x: var_percentages[x], reverse=True)
+        values = [var_percentages[v] for v in vars_sorted]
+        
+        plt.figure(figsize=(12, 6))
+        plt.bar(range(len(vars_sorted)), values, color='#d73027')
+        plt.xticks(range(len(vars_sorted)), vars_sorted, rotation=45, ha='right')
+        plt.xlabel('Variable', fontsize=12)
+        plt.ylabel('Data Removed (%)', fontsize=12)
+        plt.title('Impact of Data Cleaning: Percentage of Values Removed per Variable', fontsize=14, fontweight='bold')
+        plt.grid(axis='y', linestyle='--', alpha=0.3)
+        plt.tight_layout()
+        plt.savefig(f"{output_dir}/cleaning_impact.png", dpi=300)
+        plt.close()
+        print(f"\n✓ Saved cleaning impact plot to {output_dir}/cleaning_impact.png")
+
 
 
 def main():
@@ -569,6 +780,7 @@ def main():
     checker.run_checks()
     checker.print_summary()
     checker.save_report()
+    checker.create_plots()
     print("\nNumerical checks completed")
     
     print("\n" + "="*80)
@@ -582,6 +794,7 @@ def main():
         filter_outliers=False,
         outlier_threshold=3.0
     )
+    applier.plot_cleaning_impact()
     print("\nData cleaning completed")
     print(f"   Cleaned data saved to: {applier.output_path}")
 

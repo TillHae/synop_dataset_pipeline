@@ -19,24 +19,18 @@ def plot_station_duration(total_year_counts):
     
     for fold in sorted_keys:
         year_counts = total_year_counts[fold]
-        if bottoms is None:
-            full_index = pd.Series(0, index=range(0, 35))
-            bottoms = full_index
-        
-        current_data = full_index.add(year_counts, fill_value=0).sub(full_index, fill_value=0)
-        plt.bar(current_data.index, current_data.values, alpha=0.8, 
-                label=fold, bottom=bottoms.loc[current_data.index])
-        
-        bottoms = bottoms.add(current_data, fill_value=0) 
-
-    plt.xlabel("Total Duration (years)")
-    plt.ylabel("Number of Stations")
-    plt.title("Number of Stations by Total Duration per Fold")
-    plt.legend()
+    plt.figure(figsize=(12, 6))
+    for fold, year_counts in total_year_counts.items():
+        plt.plot(year_counts.index, year_counts.values, marker='o', label=fold, linewidth=2)
+    plt.title('Temporal Coverage of Weather Stations by Variable Category', fontsize=14, fontweight='bold')
+    plt.xlabel('Number of Years with Available Data', fontsize=12)
+    plt.ylabel('Number of Stations', fontsize=12)
+    plt.legend(title='Variable Category', fontsize=10)
+    plt.grid(True, alpha=0.3)
     max_duration = max(max(yc.index) for yc in total_year_counts.values()) 
     plt.xticks(range(0, max_duration + 1))
     plt.tight_layout()
-    plt.savefig("plots/station_durations.png")
+    plt.savefig("plots/v1/station_durations.png", dpi=300)
     plt.close()
 
 print("--- Create Station Duration Plot ---")
