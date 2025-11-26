@@ -13,6 +13,5 @@ data/*
 *.pkl
 *.slurm
 
-notes.md
 test.py
 paper
