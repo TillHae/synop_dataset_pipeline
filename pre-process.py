@@ -294,7 +294,7 @@ def check_content(fold):
     print(f"{fold} has {len(os.listdir(unzip_folder))} files")
 
     num_workers = min(32, cpu_count())
-    jobs = [[f, unzip_folder] for f in os.listdir(unzip_folder)]
+    jobs = [(f, unzip_folder) for f in os.listdir(unzip_folder)]
     with Pool(num_workers) as pool:
         results = pool.starmap(process_file_check, jobs)
 
@@ -465,12 +465,6 @@ print("starting incorrect check")
 for fold in folds:
     incorrect.update(check_content(fold))
     print(f"finished {fold}")
-
-with open("incorrect.pkl", "wb") as f:
-    pickle.dump(incorrect, f)
-
-#with open("incorrect.pkl", "rb") as f:
-    #incorrect = pickle.load(f)
 
 print("starting incorrect resolve")
 process_incorrect(incorrect)

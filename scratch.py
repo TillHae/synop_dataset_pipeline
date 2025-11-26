@@ -1,4 +1,5 @@
 import requests
+from multiprocessing import Pool, cpu_count
 import os
 import json
 import matplotlib.pyplot as plt

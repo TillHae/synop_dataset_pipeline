@@ -85,8 +85,6 @@ def process_year(year, metadata):
 
     ds = merged.set_index(["station_id", "time"]).to_xarray()
 
-    print(ds["time"][0].values, ds["time"][-1].values)
-
     os.makedirs("data/datasetv1", exist_ok=True)
     ds.to_netcdf(f"data/datasetv1/{year}.nc")
     print(f"Saved {year}.nc ({len(merged)} rows)")
@@ -108,7 +106,7 @@ def create_dataset():
     })
     print("--- Finished reading metadata ---")
 
-    for year in range(1992, 1996):
+    for year in range(1990, 2025):
         process_year(year, metadata)
 
 if __name__ == "__main__":
