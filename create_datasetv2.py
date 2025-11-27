@@ -1,10 +1,14 @@
-import xarray as xr
-import numpy as np
-import pandas as pd
+import os
+import warnings
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
+
 import matplotlib.pyplot as plt
-import os
+import numpy as np
+import pandas as pd
+import xarray as xr
+
+warnings.filterwarnings("ignore", category=UserWarning)
 
 
 class NumericalChecker:

@@ -15,3 +15,7 @@ data/*
 
 test.py
 paper
+
+# macOS system files
+.DS_Store
+**/.DS_Store

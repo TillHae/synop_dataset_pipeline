@@ -3,4 +3,5 @@ beautifulsoup4
 matplotlib
 pandas
 xarray
+numpy
 netCDF4
