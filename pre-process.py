@@ -90,7 +90,7 @@ def delete_duplicates(fold, dups):
                     to_delete.append(f"data/{fold}/unzips/*_{station['start_dates'][i - 1].strftime('%Y%m%d')}_{station['end_dates'][i - 1].strftime('%Y%m%d')}_{station['station_id']}.txt")
 
     for f in to_delete:
-        os.remove(f)
+        os.system(f"rm {f}")
 
     print(f"{fold} done!")
 
