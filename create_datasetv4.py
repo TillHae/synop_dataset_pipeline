@@ -67,8 +67,11 @@ def interpolate_variable(data: np.ndarray, max_gap: int = 6) -> tuple:
 
 def extrapolate_variable(data: np.ndarray, max_extrap: int = 2) -> tuple:
     """
-    Attempt to extrapolate leading/trailing NaN values using linear extrapolation.
-    Only extrapolates short gaps (max_extrap timesteps) to avoid unrealistic predictions.
+    Extrapolate NaN values using linear extrapolation.
+    Handles three cases:
+    1. Leading NaNs (at start of time series) - backward extrapolation
+    2. Trailing NaNs (at end of time series) - forward extrapolation
+    3. Edges of remaining internal gaps - backward (left edge) and forward (right edge)
     """
     data_extrap = data.copy()
     stats = {
@@ -125,6 +128,59 @@ def extrapolate_variable(data: np.ndarray, max_extrap: int = 2) -> tuple:
                     
                     stats['extrapolated_forward'] += trailing_nans
         
+        is_nan = series.isna()
+        nan_groups = []
+        in_gap = False
+        gap_start = None
+        
+        for i, is_missing in enumerate(is_nan):
+            if is_missing and not in_gap:
+                gap_start = i
+                in_gap = True
+            elif not is_missing and in_gap:
+                nan_groups.append((gap_start, i))
+                in_gap = False
+        
+        if in_gap:
+            nan_groups.append((gap_start, len(series)))
+        
+        for gap_start, gap_end in nan_groups:
+            gap_size = gap_end - gap_start
+            has_left = gap_start > 0 and not np.isnan(series.iloc[gap_start - 1])
+            has_right = gap_end < len(series) and not np.isnan(series.iloc[gap_end])
+            
+            if has_left:
+                n_points = min(4, gap_start)
+                if n_points >= 2:
+                    x_vals = np.arange(gap_start - n_points, gap_start)
+                    y_vals = series.iloc[gap_start - n_points:gap_start].values
+                    
+                    slope = (y_vals[-1] - y_vals[0]) / (x_vals[-1] - x_vals[0])
+                    intercept = y_vals[-1] - slope * x_vals[-1]
+                    fill_count = min(max_extrap, gap_size)
+                    filled = 0
+                    for i in range(gap_start, gap_start + fill_count):
+                        if np.isnan(series.iloc[i]):
+                            series.iloc[i] = slope * i + intercept
+                            filled += 1
+                    stats['extrapolated_backward'] += filled
+            
+            if has_right:
+                n_points = min(4, len(series) - gap_end)
+                if n_points >= 2:
+                    x_vals = np.arange(gap_end, gap_end + n_points)
+                    y_vals = series.iloc[gap_end:gap_end + n_points].values
+                    
+                    slope = (y_vals[-1] - y_vals[0]) / (x_vals[-1] - x_vals[0])
+                    intercept = y_vals[0] - slope * x_vals[0]
+                    fill_count = min(max_extrap, gap_size)
+                    filled = 0
+                    for i in range(gap_end - fill_count, gap_end):
+                        if np.isnan(series.iloc[i]):
+                            series.iloc[i] = slope * i + intercept
+                            filled += 1
+                    stats['extrapolated_forward'] += filled
+        
         data_extrap[station_idx, :] = series.values
     
     stats['remaining_nans'] = int(np.isnan(data_extrap).sum())
@@ -145,6 +201,11 @@ def process_file(nc_file: Path, output_dir: Path, max_gap: int = 6, max_extrap: 
         
         for var_name in ds.data_vars:
             if not np.issubdtype(ds[var_name].dtype, np.number):
+                continue
+            
+            # Skip metadata variables - they should not be interpolated/extrapolated
+            metadata_vars = ['height', 'latitude', 'longitude', 'QN']
+            if var_name in metadata_vars:
                 continue
             
             data = ds[var_name].values
