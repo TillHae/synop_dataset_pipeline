@@ -695,20 +695,23 @@ class NumericalChecker:
                 
                 rc = var_results['range_check']
                 if 'below_min' in rc and 'above_max' in rc:
+                    if var_name not in violation_data:
+                        violation_data[var_name] = {'violations': 0, 'total': 0}
+                    
                     total_violations = rc['below_min'] + rc['above_max']
                     total_values = rc.get('in_range', 0) + total_violations
-                    if total_values > 0:
-                        violation_pct = (total_violations / total_values) * 100
-                        if var_name not in violation_data:
-                            violation_data[var_name] = []
-
-                        violation_data[var_name].append(violation_pct)
+                    violation_data[var_name]['violations'] += total_violations
+                    violation_data[var_name]['total'] += total_values
         
         if not violation_data:
             print("  No range violation data to plot")
             return
         
-        avg_violations = {var: np.mean(vals) for var, vals in violation_data.items()}
+        avg_violations = {
+            var: (data['violations'] / data['total'] * 100) if data['total'] > 0 else 0
+            for var, data in violation_data.items()
+        }
+        
         plt.figure(figsize=(12, 6))
         vars_sorted = sorted(avg_violations.keys(), key=lambda x: avg_violations[x], reverse=True)
         values = [avg_violations[v] for v in vars_sorted]
