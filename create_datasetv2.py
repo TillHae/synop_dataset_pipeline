@@ -7,14 +7,20 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import xarray as xr
+from scipy import stats
+from statsmodels.tsa.stattools import adfuller, kpss
 
 warnings.filterwarnings("ignore", category=UserWarning)
+warnings.filterwarnings("ignore", category=FutureWarning)
 
 
 class NumericalChecker:
     def __init__(self, dataset_path: str):
         self.dataset_path = Path(dataset_path)
         self.results = {}
+        
+        # Define metadata variables that should be excluded from most checks
+        self.metadata_vars = ['height', 'latitude', 'longitude', 'QN', 'eor']
         
         # Define physically reasonable ranges for german meteorological variables
         self.variable_ranges = {
@@ -106,36 +112,144 @@ class NumericalChecker:
             'has_issues': below_min > 0 or above_max > 0
         }
     
-    def check_outliers(self, data: xr.DataArray, var_name: str, threshold: float = 3.0) -> Dict:
+    def check_stationarity(self, data: xr.DataArray, var_name: str) -> Dict:
+        """Test for stationarity using ADF and KPSS tests."""
+        if 'time' not in data.dims:
+            return {
+                'stationarity_check': False,
+                'message': 'No time dimension found'
+            }
+        
+        # Get 1D time series (average across stations if needed)
+        if len(data.dims) > 1:
+            if 'station_id' in data.dims:
+                data_1d = data.mean(dim='station_id')
+            else:
+                data_1d = data
+        else:
+            data_1d = data
+        
+        valid_data = data_1d.values[~np.isnan(data_1d.values)]
+        
+        if len(valid_data) < 50:  # Need sufficient data for stationarity tests
+            return {
+                'stationarity_check': False,
+                'message': 'Insufficient data for stationarity tests (need >= 50 points)'
+            }
+        
+        try:
+            # Augmented Dickey-Fuller test (null hypothesis: non-stationary)
+            adf_result = adfuller(valid_data, autolag='AIC')
+            adf_statistic = float(adf_result[0])
+            adf_pvalue = float(adf_result[1])
+            adf_stationary = adf_pvalue < 0.05  # Reject null = stationary
+            
+            # KPSS test (null hypothesis: stationary)
+            kpss_result = kpss(valid_data, regression='c', nlags='auto')
+            kpss_statistic = float(kpss_result[0])
+            kpss_pvalue = float(kpss_result[1])
+            kpss_stationary = kpss_pvalue > 0.05  # Fail to reject null = stationary
+            
+            # Both tests should agree for clear conclusion
+            is_stationary = adf_stationary and kpss_stationary
+            
+            return {
+                'stationarity_check': True,
+                'adf_statistic': adf_statistic,
+                'adf_pvalue': adf_pvalue,
+                'adf_stationary': adf_stationary,
+                'kpss_statistic': kpss_statistic,
+                'kpss_pvalue': kpss_pvalue,
+                'kpss_stationary': kpss_stationary,
+                'is_stationary': is_stationary,
+                'has_issues': not is_stationary
+            }
+        except Exception as e:
+            return {
+                'stationarity_check': False,
+                'message': f'Error in stationarity tests: {str(e)}'
+            }
+    
+    def check_variance_homogeneity(self, data: xr.DataArray, var_name: str) -> Dict:
+        """Test for variance homogeneity across stations using Levene's test."""
+        if 'station_id' not in data.dims:
+            return {
+                'variance_check': False,
+                'message': 'No station_id dimension found'
+            }
+        
+        # Get data for each station
+        station_data = []
+        for i in range(data.shape[0]):
+            station_vals = data.values[i, :]
+            valid_vals = station_vals[~np.isnan(station_vals)]
+            if len(valid_vals) >= 10:  # Need minimum data per station
+                station_data.append(valid_vals)
+        
+        if len(station_data) < 2:
+            return {
+                'variance_check': False,
+                'message': 'Insufficient stations with valid data'
+            }
+        
+        try:
+            # Levene's test (null hypothesis: equal variances)
+            levene_statistic, levene_pvalue = stats.levene(*station_data)
+            homogeneous = levene_pvalue > 0.05  # Fail to reject null = homogeneous
+            
+            # Calculate variance statistics
+            variances = [np.var(s) for s in station_data]
+            
+            return {
+                'variance_check': True,
+                'levene_statistic': float(levene_statistic),
+                'levene_pvalue': float(levene_pvalue),
+                'homogeneous_variance': homogeneous,
+                'min_variance': float(np.min(variances)),
+                'max_variance': float(np.max(variances)),
+                'mean_variance': float(np.mean(variances)),
+                'variance_ratio': float(np.max(variances) / np.min(variances)) if np.min(variances) > 0 else np.inf,
+                'has_issues': not homogeneous
+            }
+        except Exception as e:
+            return {
+                'variance_check': False,
+                'message': f'Error in variance test: {str(e)}'
+            }
+    
+    def check_distribution(self, data: xr.DataArray, var_name: str) -> Dict:
+        """Test distribution using Kolmogorov-Smirnov test for normality."""
         valid_data = data.values[~np.isnan(data.values)]
         
-        if len(valid_data) < 2:
+        if len(valid_data) < 20:
             return {
-                'outliers_detected': False,
-                'message': 'Insufficient data for outlier detection'
+                'distribution_check': False,
+                'message': 'Insufficient data for distribution tests'
             }
         
-        mean = np.mean(valid_data)
-        std = np.std(valid_data)
-        
-        if std == 0:
+        try:
+            # Kolmogorov-Smirnov test for normality
+            ks_statistic, ks_pvalue = stats.kstest(valid_data, 'norm', args=(np.mean(valid_data), np.std(valid_data)))
+            is_normal = ks_pvalue > 0.05
+            
+            # Calculate distribution statistics
+            skewness = float(stats.skew(valid_data))
+            kurtosis = float(stats.kurtosis(valid_data))
+            
             return {
-                'outliers_detected': False,
-                'message': 'Zero standard deviation - all values identical'
+                'distribution_check': True,
+                'ks_statistic': float(ks_statistic),
+                'ks_pvalue': float(ks_pvalue),
+                'is_normal': is_normal,
+                'skewness': skewness,
+                'kurtosis': kurtosis,
+                'has_issues': False  # Non-normality is not necessarily an issue
             }
-        
-        z_scores = np.abs((valid_data - mean) / std)
-        outliers = np.sum(z_scores > threshold)
-        
-        return {
-            'outliers_detected': True,
-            'mean': float(mean),
-            'std': float(std),
-            'outlier_count': int(outliers),
-            'outlier_percentage': (outliers / len(valid_data) * 100) if len(valid_data) > 0 else 0,
-            'threshold': threshold,
-            'has_issues': outliers > len(valid_data) * 0.01  # Flag if >1% outliers
-        }
+        except Exception as e:
+            return {
+                'distribution_check': False,
+                'message': f'Error in distribution test: {str(e)}'
+            }
     
     def check_temporal_consistency(self, data: xr.DataArray, var_name: str) -> Dict:
         if 'time' not in data.dims:
@@ -191,18 +305,31 @@ class NumericalChecker:
             'dtype': str(data.dtype),
             'shape': data.shape,
             'dimensions': list(data.dims),
+            'is_metadata': var_name in self.metadata_vars
         }
         
+        # Always run basic checks
         checks['nan_inf_check'] = self.check_nan_inf(data, var_name)
         checks['range_check'] = self.check_range(data, var_name)
-        checks['outlier_check'] = self.check_outliers(data, var_name)
-        checks['temporal_check'] = self.check_temporal_consistency(data, var_name)
+        
+        # Skip advanced statistical checks for metadata variables
+        if var_name not in self.metadata_vars:
+            checks['stationarity_check'] = self.check_stationarity(data, var_name)
+            checks['variance_check'] = self.check_variance_homogeneity(data, var_name)
+            checks['distribution_check'] = self.check_distribution(data, var_name)
+            checks['temporal_check'] = self.check_temporal_consistency(data, var_name)
+        else:
+            checks['stationarity_check'] = {'stationarity_check': False, 'message': 'Skipped for metadata variable'}
+            checks['variance_check'] = {'variance_check': False, 'message': 'Skipped for metadata variable'}
+            checks['distribution_check'] = {'distribution_check': False, 'message': 'Skipped for metadata variable'}
+            checks['temporal_check'] = {'temporal_check': False, 'message': 'Skipped for metadata variable'}
         
         has_any_issues = any([
             checks['nan_inf_check'].get('has_issues', False),
             checks['range_check'].get('has_issues', False),
-            checks['outlier_check'].get('has_issues', False),
-            checks['temporal_check'].get('has_issues', False)
+            checks.get('stationarity_check', {}).get('has_issues', False),
+            checks.get('variance_check', {}).get('has_issues', False),
+            checks.get('temporal_check', {}).get('has_issues', False)
         ])
         
         checks['status'] = 'WARNING' if has_any_issues else 'OK'
@@ -280,7 +407,7 @@ class NumericalChecker:
                 print(f"\n{filename}: ERROR - {file_results['error']}")
                 continue
             
-            print(f"\n📁 {filename}")
+            print(f"\n {filename}")
             print(f"   Dimensions: {file_results['dimensions']}")
             
             total_vars = len(file_results['variables'])
@@ -298,23 +425,32 @@ class NumericalChecker:
                     if var_results['nan_inf_check'].get('has_issues'):
                         nan_pct = var_results['nan_inf_check']['nan_percentage']
                         inf_pct = var_results['nan_inf_check']['inf_percentage']
-                        print(f"      - NaN: {nan_pct:.2f}%, Inf: {inf_pct:.2f}%")
+                        print(f"      NaN: {nan_pct:.2f}%, Inf: {inf_pct:.2f}%")
                     
                     if var_results['range_check'].get('has_issues'):
                         rc = var_results['range_check']
-                        print(f"      - Out of range: {rc['below_min']} below min, "
+                        print(f"      Out of range: {rc['below_min']} below min, "
                               f"{rc['above_max']} above max")
                         print(f"        Expected: {rc['expected_range']}, "
                               f"Actual: {rc['actual_range']}")
                     
-                    if var_results['outlier_check'].get('has_issues'):
-                        oc = var_results['outlier_check']
-                        print(f"      - Outliers: {oc['outlier_count']} "
-                              f"({oc['outlier_percentage']:.2f}%)")
+                    if var_results.get('stationarity_check', {}).get('has_issues'):
+                        sc = var_results['stationarity_check']
+                        if sc.get('stationarity_check'):
+                            print(f"      Non-stationary time series")
+                            print(f"        ADF p-value: {sc.get('adf_pvalue', 'N/A'):.4f}, "
+                                  f"KPSS p-value: {sc.get('kpss_pvalue', 'N/A'):.4f}")
                     
-                    if var_results['temporal_check'].get('has_issues'):
+                    if var_results.get('variance_check', {}).get('has_issues'):
+                        vc = var_results['variance_check']
+                        if vc.get('variance_check'):
+                            print(f"      Heterogeneous variance across stations")
+                            print(f"        Levene p-value: {vc.get('levene_pvalue', 'N/A'):.4f}, "
+                                  f"Variance ratio: {vc.get('variance_ratio', 'N/A'):.2f}")
+                    
+                    if var_results.get('temporal_check', {}).get('has_issues'):
                         tc = var_results['temporal_check']
-                        print(f"      - Large temporal jumps: {tc['large_jumps']}")
+                        print(f"      Large temporal jumps: {tc['large_jumps']}")
         
         print("\n" + "="*80)
     
@@ -328,7 +464,8 @@ class NumericalChecker:
         
         self.plot_completeness_heatmap(output_dir)
         self.plot_nan_percentages(output_dir)
-        self.plot_outlier_distribution(output_dir)
+        self.plot_stationarity_results(output_dir)
+        self.plot_variance_results(output_dir)
         self.plot_range_violations(output_dir)
         
         print(f"All plots saved to {output_dir}/")
@@ -409,43 +546,103 @@ class NumericalChecker:
         plt.close()
         print(f"  Saved nan_percentages.png")
     
-    def plot_outlier_distribution(self, output_dir: str):
-        outlier_data = {}
+    
+    def plot_stationarity_results(self, output_dir: str):
+        """Plot stationarity test results."""
+        stationarity_data = {}
         
         for filename, file_results in self.results.items():
             if 'error' in file_results:
                 continue
             
             for var_name, var_results in file_results['variables'].items():
-                if not var_results.get('outlier_check') or not var_results['outlier_check'].get('outliers_detected'):
+                if var_results.get('is_metadata'):
                     continue
-                
-                outlier_pct = var_results['outlier_check'].get('outlier_percentage', 0)
-                
-                if var_name not in outlier_data:
-                    outlier_data[var_name] = []
-                outlier_data[var_name].append(outlier_pct)
+                    
+                sc = var_results.get('stationarity_check', {})
+                if sc.get('stationarity_check'):
+                    if var_name not in stationarity_data:
+                        stationarity_data[var_name] = {'stationary': 0, 'non_stationary': 0}
+                    
+                    if sc.get('is_stationary'):
+                        stationarity_data[var_name]['stationary'] += 1
+                    else:
+                        stationarity_data[var_name]['non_stationary'] += 1
         
-        if not outlier_data:
-            print("  No outlier data to plot")
+        if not stationarity_data:
+            print("  No stationarity data to plot")
             return
         
-        avg_outliers = {var: np.mean(vals) for var, vals in outlier_data.items()}
+        # Calculate percentage non-stationary
+        non_stationary_pct = {}
+        for var, data in stationarity_data.items():
+            total = data['stationary'] + data['non_stationary']
+            if total > 0:
+                non_stationary_pct[var] = (data['non_stationary'] / total) * 100
         
         plt.figure(figsize=(12, 6))
-        vars_sorted = sorted(avg_outliers.keys(), key=lambda x: avg_outliers[x], reverse=True)
-        values = [avg_outliers[v] for v in vars_sorted]
+        vars_sorted = sorted(non_stationary_pct.keys(), key=lambda x: non_stationary_pct[x], reverse=True)
+        values = [non_stationary_pct[v] for v in vars_sorted]
+        colors = ['#d73027' if v > 50 else '#fee08b' if v > 20 else '#1a9850' for v in values]
         
-        plt.bar(range(len(vars_sorted)), values, color='darkorange')
+        plt.bar(range(len(vars_sorted)), values, color=colors)
         plt.xticks(range(len(vars_sorted)), vars_sorted, rotation=45, ha='right')
         plt.xlabel('Variable', fontsize=12)
-        plt.ylabel('Statistical Outliers (%)', fontsize=12)
-        plt.title('Statistical Outlier Detection (Z-score > 3)', fontsize=14, fontweight='bold')
+        plt.ylabel('Non-Stationary Files (%)', fontsize=12)
+        plt.title('Stationarity Test Results (ADF + KPSS)', fontsize=14, fontweight='bold')
         plt.grid(axis='y', linestyle='--', alpha=0.3)
         plt.tight_layout()
-        plt.savefig(f"{output_dir}/outlier_distribution.png", dpi=300)
+        plt.savefig(f"{output_dir}/stationarity_results.png", dpi=300)
         plt.close()
-        print(f"  Saved outlier_distribution.png")
+        print(f"  Saved stationarity_results.png")
+    
+    def plot_variance_results(self, output_dir: str):
+        """Plot variance homogeneity test results."""
+        variance_data = {}
+        
+        for filename, file_results in self.results.items():
+            if 'error' in file_results:
+                continue
+            
+            for var_name, var_results in file_results['variables'].items():
+                if var_results.get('is_metadata'):
+                    continue
+                    
+                vc = var_results.get('variance_check', {})
+                if vc.get('variance_check'):
+                    if var_name not in variance_data:
+                        variance_data[var_name] = []
+                    
+                    variance_ratio = vc.get('variance_ratio', 0)
+                    if variance_ratio != np.inf and variance_ratio > 0:
+                        variance_data[var_name].append(variance_ratio)
+        
+        if not variance_data:
+            print("  No variance data to plot")
+            return
+        
+        # Calculate average variance ratio
+        avg_variance_ratio = {var: np.mean(ratios) for var, ratios in variance_data.items()}
+        
+        plt.figure(figsize=(12, 6))
+        vars_sorted = sorted(avg_variance_ratio.keys(), key=lambda x: avg_variance_ratio[x], reverse=True)
+        values = [avg_variance_ratio[v] for v in vars_sorted]
+        colors = ['#d73027' if v > 10 else '#fee08b' if v > 5 else '#1a9850' for v in values]
+        
+        plt.bar(range(len(vars_sorted)), values, color=colors)
+        plt.xticks(range(len(vars_sorted)), vars_sorted, rotation=45, ha='right')
+        plt.xlabel('Variable', fontsize=12)
+        plt.ylabel('Variance Ratio (Max/Min)', fontsize=12)
+        plt.title('Variance Homogeneity Across Stations (Levene Test)', fontsize=14, fontweight='bold')
+        plt.grid(axis='y', linestyle='--', alpha=0.3)
+        plt.axhline(y=5, color='orange', linestyle='--', alpha=0.5, label='Moderate heterogeneity')
+        plt.axhline(y=10, color='red', linestyle='--', alpha=0.5, label='High heterogeneity')
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(f"{output_dir}/variance_homogeneity.png", dpi=300)
+        plt.close()
+        print(f"  Saved variance_homogeneity.png")
+    
     
     def plot_range_violations(self, output_dir: str):
         violation_data = {}
@@ -521,13 +718,22 @@ class NumericalChecker:
                         for k, v in var_results['range_check'].items():
                             f.write(f"    {k}: {v}\n")
                         
-                        f.write(f"\n  Outlier Check:\n")
-                        for k, v in var_results['outlier_check'].items():
-                            f.write(f"    {k}: {v}\n")
-                        
-                        f.write(f"\n  Temporal Check:\n")
-                        for k, v in var_results['temporal_check'].items():
-                            f.write(f"    {k}: {v}\n")
+                        if not var_results.get('is_metadata'):
+                            f.write(f"\n  Stationarity Check:\n")
+                            for k, v in var_results.get('stationarity_check', {}).items():
+                                f.write(f"    {k}: {v}\n")
+                            
+                            f.write(f"\n  Variance Homogeneity Check:\n")
+                            for k, v in var_results.get('variance_check', {}).items():
+                                f.write(f"    {k}: {v}\n")
+                            
+                            f.write(f"\n  Distribution Check:\n")
+                            for k, v in var_results.get('distribution_check', {}).items():
+                                f.write(f"    {k}: {v}\n")
+                            
+                            f.write(f"\n  Temporal Check:\n")
+                            for k, v in var_results.get('temporal_check', {}).items():
+                                f.write(f"    {k}: {v}\n")
                     
                     f.write("\n")
         
@@ -572,34 +778,6 @@ class NumericalApplier:
         
         return ds_clean
     
-    def apply_outlier_filter(self, ds: xr.Dataset, threshold: float = 3.0, replace_with_nan: bool = True) -> xr.Dataset:
-        ds_clean = ds.copy()
-        for var_name in ds.data_vars:
-            if not np.issubdtype(ds[var_name].dtype, np.number):
-                continue
-            
-            data = ds[var_name].values
-            valid_mask = ~np.isnan(data)
-            
-            if np.sum(valid_mask) < 2:
-                continue
-            
-            valid_data = data[valid_mask]
-            mean = np.mean(valid_data)
-            std = np.std(valid_data)
-            
-            if std == 0:
-                continue
-            
-            z_scores = np.abs((data - mean) / std)
-            if replace_with_nan:
-                ds_clean[var_name] = xr.where(
-                    z_scores > threshold,
-                    np.nan,
-                    ds[var_name]
-                )
-        
-        return ds_clean
     
     def calculate_cleaning_stats(self, ds_original: xr.Dataset, ds_clean: xr.Dataset) -> Dict:
         stats = {}
@@ -624,36 +802,28 @@ class NumericalApplier:
         
         return stats
     
-    def apply_filters(self, ds: xr.Dataset, filter_inf: bool = True, filter_range: bool = True,
-                     filter_outliers: bool = False, outlier_threshold: float = 3.0) -> Tuple[xr.Dataset, Dict]:
+    def apply_filters(self, ds: xr.Dataset, filter_inf: bool = True, filter_range: bool = True) -> Tuple[xr.Dataset, Dict]:
         ds_clean = ds.copy()
         print("  Applying filters:")
         if filter_inf:
-            print("    - Removing infinite values")
+            print("    Removing infinite values")
             ds_clean = self.apply_nan_inf_filter(ds_clean)
         
         if filter_range:
-            print("    - Filtering out-of-range values")
+            print("    Filtering out-of-range values")
             ds_clean = self.apply_range_filter(ds_clean, replace_with_nan=True)
-        
-        if filter_outliers:
-            print(f"    - Filtering outliers (threshold={outlier_threshold})")
-            ds_clean = self.apply_outlier_filter(ds_clean, threshold=outlier_threshold)
         
         stats = self.calculate_cleaning_stats(ds, ds_clean)
         return ds_clean, stats
     
-    def process_file(self, nc_file: Path, filter_inf: bool = True, filter_range: bool = True,
-                    filter_outliers: bool = False, outlier_threshold: float = 3.0) -> None:
+    def process_file(self, nc_file: Path, filter_inf: bool = True, filter_range: bool = True) -> None:
         print(f"\nProcessing: {nc_file.name}")
         try:
             ds = xr.open_dataset(nc_file)
             ds_clean, stats = self.apply_filters(
                 ds, 
                 filter_inf=filter_inf,
-                filter_range=filter_range,
-                filter_outliers=filter_outliers,
-                outlier_threshold=outlier_threshold
+                filter_range=filter_range
             )
             
             self.cleaning_stats[nc_file.name] = stats
@@ -675,8 +845,7 @@ class NumericalApplier:
             import traceback
             traceback.print_exc()
     
-    def run(self, filter_inf: bool = True, filter_range: bool = True,
-            filter_outliers: bool = False, outlier_threshold: float = 3.0) -> None:
+    def run(self, filter_inf: bool = True, filter_range: bool = True) -> None:
         if self.dataset_path.is_file():
             files = [self.dataset_path]
         elif self.dataset_path.is_dir():
@@ -692,17 +861,12 @@ class NumericalApplier:
         print(f"\nFilters enabled:")
         print(f"  Infinite values: {filter_inf}")
         print(f"  Range validation: {filter_range}")
-        print(f"  Outlier detection: {filter_outliers}")
-        if filter_outliers:
-            print(f"  (threshold: {outlier_threshold} std)")
         
         for nc_file in files:
             self.process_file(
                 nc_file,
                 filter_inf=filter_inf,
-                filter_range=filter_range,
-                filter_outliers=filter_outliers,
-                outlier_threshold=outlier_threshold
+                filter_range=filter_range
             )
         
         self.save_summary_report()
@@ -768,7 +932,7 @@ class NumericalApplier:
         plt.tight_layout()
         plt.savefig(f"{output_dir}/cleaning_impact.png", dpi=300)
         plt.close()
-        print(f"\n✓ Saved cleaning impact plot to {output_dir}/cleaning_impact.png")
+        print(f"\n Saved cleaning impact plot to {output_dir}/cleaning_impact.png")
 
 
 
@@ -794,9 +958,7 @@ def main():
     
     applier.run(
         filter_inf=True,
-        filter_range=True,
-        filter_outliers=False,
-        outlier_threshold=3.0
+        filter_range=True
     )
     applier.plot_cleaning_impact()
     print("\nData cleaning completed")

@@ -5,3 +5,5 @@ pandas
 xarray
 numpy
 netCDF4
+scipy
+statsmodels
