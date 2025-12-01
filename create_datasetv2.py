@@ -120,7 +120,6 @@ class NumericalChecker:
                 'message': 'No time dimension found'
             }
         
-        # Get 1D time series (average across stations if needed)
         if len(data.dims) > 1:
             if 'station_id' in data.dims:
                 data_1d = data.mean(dim='station_id')
@@ -130,8 +129,7 @@ class NumericalChecker:
             data_1d = data
         
         valid_data = data_1d.values[~np.isnan(data_1d.values)]
-        
-        if len(valid_data) < 50:  # Need sufficient data for stationarity tests
+        if len(valid_data) < 50:
             return {
                 'stationarity_check': False,
                 'message': 'Insufficient data for stationarity tests (need >= 50 points)'
@@ -142,17 +140,15 @@ class NumericalChecker:
             adf_result = adfuller(valid_data, autolag='AIC')
             adf_statistic = float(adf_result[0])
             adf_pvalue = float(adf_result[1])
-            adf_stationary = adf_pvalue < 0.05  # Reject null = stationary
+            adf_stationary = adf_pvalue < 0.05
             
             # KPSS test (null hypothesis: stationary)
             kpss_result = kpss(valid_data, regression='c', nlags='auto')
             kpss_statistic = float(kpss_result[0])
             kpss_pvalue = float(kpss_result[1])
-            kpss_stationary = kpss_pvalue > 0.05  # Fail to reject null = stationary
+            kpss_stationary = kpss_pvalue > 0.05
             
-            # Both tests should agree for clear conclusion
             is_stationary = adf_stationary and kpss_stationary
-            
             return {
                 'stationarity_check': True,
                 'adf_statistic': adf_statistic,
@@ -178,12 +174,11 @@ class NumericalChecker:
                 'message': 'No station_id dimension found'
             }
         
-        # Get data for each station
         station_data = []
         for i in range(data.shape[0]):
             station_vals = data.values[i, :]
             valid_vals = station_vals[~np.isnan(station_vals)]
-            if len(valid_vals) >= 10:  # Need minimum data per station
+            if len(valid_vals) >= 10:
                 station_data.append(valid_vals)
         
         if len(station_data) < 2:
@@ -195,9 +190,8 @@ class NumericalChecker:
         try:
             # Levene's test (null hypothesis: equal variances)
             levene_statistic, levene_pvalue = stats.levene(*station_data)
-            homogeneous = levene_pvalue > 0.05  # Fail to reject null = homogeneous
+            homogeneous = levene_pvalue > 0.05
             
-            # Calculate variance statistics
             variances = [np.var(s) for s in station_data]
             
             return {
@@ -243,7 +237,7 @@ class NumericalChecker:
                 'is_normal': is_normal,
                 'skewness': skewness,
                 'kurtosis': kurtosis,
-                'has_issues': False  # Non-normality is not necessarily an issue
+                'has_issues': False
             }
         except Exception as e:
             return {
@@ -252,17 +246,85 @@ class NumericalChecker:
             }
     
     def check_temporal_consistency(self, data: xr.DataArray, var_name: str) -> Dict:
+        """Check for unrealistic temporal jumps based on variable-specific physical constraints."""
         if 'time' not in data.dims:
             return {
                 'temporal_check': False,
                 'message': 'No time dimension found'
             }
         
+        # Define variable-specific maximum realistic changes per 10-minute interval
+        max_realistic_changes = {
+            # Temperature: Can't should not more than ~5°C in 10 minutes under normal conditions
+            'TU': 5.0, 'TX_10': 5.0, 'TX5_10': 5.0, 'TN_10': 5.0, 'TN5_10': 5.0,
+            'TT_10': 5.0, 'TM5_10': 5.0, 'TD_10': 5.0,
+            
+            # Wind: Can change rapidly (gusts), so those are generous threshold
+            'FF_10': 30.0,
+            'FX_10': 40.0, 'FNX_10': 40.0, 'FMX_10': 40.0,
+            
+            # Wind direction: Can change 360° instantly (wind shift), so skip this check
+            
+            # Precipitation: Highly volatile, can go 0→50mm in 10 min (cloudburst)
+            # => Only flag if it exceeds physical maximum
+            'RWS_10': 100.0,  # Use range maximum as threshold
+            'RWS_DAU_10': 10.0,  # Duration can't exceed 10 minutes
+            
+            # Solar radiation: Changes dramatically (night→day), but gradually
+            # Flag only impossible jumps (sensor errors)
+            'GS_10': 500.0,  # Can go from 0 to max in one interval (clouds)
+            'DS_10': 350.0,
+            'SD_10': 600.0,
+            'LS_10': 500.0,
+            
+            # Pressure: Very stable, shouldn't change much in 10 minutes
+            'PP_10': 5.0,  # hPa - anything more is likely sensor error
+            
+            # Humidity: Can change rapidly but not instantaneously
+            'RF_10': 30.0,  # % - rapid but not instant changes
+        }
+        
+        if var_name not in max_realistic_changes:
+            return {
+                'temporal_check': False,
+                'message': f'No temporal threshold defined for {var_name}'
+            }
+        
+        threshold = max_realistic_changes[var_name]
         if len(data.dims) > 1:
             if 'station_id' in data.dims:
-                data_1d = data.mean(dim='station_id')
+                all_large_jumps = []
+                all_max_diffs = []
+                for i in range(data.shape[0]):
+                    station_data = data.values[i, :]
+                    valid_mask = ~np.isnan(station_data)
+                    if np.sum(valid_mask) < 2:
+                        continue
+                    
+                    diffs = np.diff(station_data[valid_mask])
+                    if len(diffs) > 0:
+                        large_jumps = np.sum(np.abs(diffs) > threshold)
+                        all_large_jumps.append(large_jumps)
+                        all_max_diffs.append(np.max(np.abs(diffs)))
+                
+                if not all_large_jumps:
+                    return {
+                        'temporal_check': False,
+                        'message': 'Insufficient valid data points'
+                    }
+                
+                total_large_jumps = sum(all_large_jumps)
+                max_diff = max(all_max_diffs) if all_max_diffs else 0
+                return {
+                    'temporal_check': True,
+                    'threshold': float(threshold),
+                    'max_diff': float(max_diff),
+                    'large_jumps': int(total_large_jumps),
+                    'has_issues': total_large_jumps > 0
+                }
             else:
                 data_1d = data
+
         else:
             data_1d = data
         
@@ -274,24 +336,17 @@ class NumericalChecker:
             }
         
         diffs = np.diff(data_1d.values[valid_mask])
-        
         if len(diffs) == 0:
             return {
                 'temporal_check': False,
                 'message': 'No consecutive valid values'
             }
         
-        mean_diff = np.mean(np.abs(diffs))
-        std_diff = np.std(diffs)
         max_diff = np.max(np.abs(diffs))
-        
-        # Flag large jumps (>5 std from mean difference)
-        large_jumps = np.sum(np.abs(diffs) > mean_diff + 5 * std_diff)
-        
+        large_jumps = np.sum(np.abs(diffs) > threshold)
         return {
             'temporal_check': True,
-            'mean_absolute_diff': float(mean_diff),
-            'std_diff': float(std_diff),
+            'threshold': float(threshold),
             'max_diff': float(max_diff),
             'large_jumps': int(large_jumps),
             'has_issues': large_jumps > 0
@@ -299,7 +354,6 @@ class NumericalChecker:
     
     def check_variable(self, data: xr.DataArray, var_name: str) -> Dict:
         print(f"  Checking variable: {var_name}")
-        
         checks = {
             'variable_name': var_name,
             'dtype': str(data.dtype),
@@ -308,11 +362,8 @@ class NumericalChecker:
             'is_metadata': var_name in self.metadata_vars
         }
         
-        # Always run basic checks
         checks['nan_inf_check'] = self.check_nan_inf(data, var_name)
         checks['range_check'] = self.check_range(data, var_name)
-        
-        # Skip advanced statistical checks for metadata variables
         if var_name not in self.metadata_vars:
             checks['stationarity_check'] = self.check_stationarity(data, var_name)
             checks['variance_check'] = self.check_variance_homogeneity(data, var_name)
@@ -331,9 +382,8 @@ class NumericalChecker:
             checks.get('variance_check', {}).get('has_issues', False),
             checks.get('temporal_check', {}).get('has_issues', False)
         ])
-        
+
         checks['status'] = 'WARNING' if has_any_issues else 'OK'
-        
         return checks
     
     def check_dataset(self, ds: xr.Dataset, filename: str = None) -> Dict:
@@ -348,7 +398,6 @@ class NumericalChecker:
             'variables': {},
             'coordinates': {}
         }
-        
         for var_name in ds.data_vars:
             dataset_results['variables'][var_name] = self.check_variable(
                 ds[var_name], var_name
@@ -377,7 +426,6 @@ class NumericalChecker:
         print(f"Found {len(files)} NetCDF file(s) to check")
         
         all_results = {}
-        
         for nc_file in files:
             try:
                 ds = xr.open_dataset(nc_file)
@@ -451,6 +499,8 @@ class NumericalChecker:
                     if var_results.get('temporal_check', {}).get('has_issues'):
                         tc = var_results['temporal_check']
                         print(f"      Large temporal jumps: {tc['large_jumps']}")
+                        print(f"        Max change: {tc.get('max_diff', 'N/A'):.2f}, "
+                              f"Threshold: {tc.get('threshold', 'N/A'):.2f}")
         
         print("\n" + "="*80)
     
@@ -472,7 +522,6 @@ class NumericalChecker:
     
     def plot_completeness_heatmap(self, output_dir: str):
         completeness_data = {}
-        
         for filename, file_results in self.results.items():
             if 'error' in file_results:
                 continue
@@ -483,16 +532,15 @@ class NumericalChecker:
                 
                 nan_pct = var_results['nan_inf_check']['nan_percentage']
                 completeness_pct = 100 - nan_pct
-                
                 if var_name not in completeness_data:
                     completeness_data[var_name] = []
+
                 completeness_data[var_name].append(completeness_pct)
         
         if not completeness_data:
             return
         
         avg_completeness = {var: np.mean(vals) for var, vals in completeness_data.items()}
-        
         plt.figure(figsize=(12, 6))
         vars_sorted = sorted(avg_completeness.keys(), key=lambda x: avg_completeness[x])
         values = [avg_completeness[v] for v in vars_sorted]
@@ -511,7 +559,6 @@ class NumericalChecker:
     
     def plot_nan_percentages(self, output_dir: str):
         nan_data = {}
-        
         for filename, file_results in self.results.items():
             if 'error' in file_results:
                 continue
@@ -521,16 +568,15 @@ class NumericalChecker:
                     continue
                 
                 nan_pct = var_results['nan_inf_check']['nan_percentage']
-                
                 if var_name not in nan_data:
                     nan_data[var_name] = []
+
                 nan_data[var_name].append(nan_pct)
         
         if not nan_data:
             return
         
         avg_nan = {var: np.mean(vals) for var, vals in nan_data.items()}
-        
         plt.figure(figsize=(12, 6))
         vars_sorted = sorted(avg_nan.keys(), key=lambda x: avg_nan[x], reverse=True)
         values = [avg_nan[v] for v in vars_sorted]
@@ -548,9 +594,7 @@ class NumericalChecker:
     
     
     def plot_stationarity_results(self, output_dir: str):
-        """Plot stationarity test results."""
         stationarity_data = {}
-        
         for filename, file_results in self.results.items():
             if 'error' in file_results:
                 continue
@@ -573,7 +617,6 @@ class NumericalChecker:
             print("  No stationarity data to plot")
             return
         
-        # Calculate percentage non-stationary
         non_stationary_pct = {}
         for var, data in stationarity_data.items():
             total = data['stationary'] + data['non_stationary']
@@ -597,9 +640,7 @@ class NumericalChecker:
         print(f"  Saved stationarity_results.png")
     
     def plot_variance_results(self, output_dir: str):
-        """Plot variance homogeneity test results."""
         variance_data = {}
-        
         for filename, file_results in self.results.items():
             if 'error' in file_results:
                 continue
@@ -621,9 +662,7 @@ class NumericalChecker:
             print("  No variance data to plot")
             return
         
-        # Calculate average variance ratio
         avg_variance_ratio = {var: np.mean(ratios) for var, ratios in variance_data.items()}
-        
         plt.figure(figsize=(12, 6))
         vars_sorted = sorted(avg_variance_ratio.keys(), key=lambda x: avg_variance_ratio[x], reverse=True)
         values = [avg_variance_ratio[v] for v in vars_sorted]
@@ -646,7 +685,6 @@ class NumericalChecker:
     
     def plot_range_violations(self, output_dir: str):
         violation_data = {}
-        
         for filename, file_results in self.results.items():
             if 'error' in file_results:
                 continue
@@ -659,12 +697,11 @@ class NumericalChecker:
                 if 'below_min' in rc and 'above_max' in rc:
                     total_violations = rc['below_min'] + rc['above_max']
                     total_values = rc.get('in_range', 0) + total_violations
-                    
                     if total_values > 0:
                         violation_pct = (total_violations / total_values) * 100
-                        
                         if var_name not in violation_data:
                             violation_data[var_name] = []
+
                         violation_data[var_name].append(violation_pct)
         
         if not violation_data:
@@ -672,7 +709,6 @@ class NumericalChecker:
             return
         
         avg_violations = {var: np.mean(vals) for var, vals in violation_data.items()}
-        
         plt.figure(figsize=(12, 6))
         vars_sorted = sorted(avg_violations.keys(), key=lambda x: avg_violations[x], reverse=True)
         values = [avg_violations[v] for v in vars_sorted]
@@ -762,11 +798,9 @@ class NumericalApplier:
     
     def apply_range_filter(self, ds: xr.Dataset, replace_with_nan: bool = True) -> xr.Dataset:
         ds_clean = ds.copy()
-        
         for var_name in ds.data_vars:
             if var_name in self.checker.variable_ranges:
                 min_val, max_val = self.checker.variable_ranges[var_name]
-                
                 if replace_with_nan:
                     ds_clean[var_name] = xr.where(
                         (ds[var_name] < min_val) | (ds[var_name] > max_val),
@@ -889,7 +923,6 @@ class NumericalApplier:
                     f.write(f"    Removed: {var_stats['removed']:,} "
                            f"({var_stats['removed_percentage']:.2f}%)\n")
                 
-                # File totals
                 total_removed = sum(s['removed'] for s in stats.values())
                 total_original = sum(s['original_valid'] for s in stats.values())
                 overall_pct = (total_removed / total_original * 100) if total_original > 0 else 0
@@ -933,7 +966,6 @@ class NumericalApplier:
         plt.savefig(f"{output_dir}/cleaning_impact.png", dpi=300)
         plt.close()
         print(f"\n Saved cleaning impact plot to {output_dir}/cleaning_impact.png")
-
 
 
 def main():
