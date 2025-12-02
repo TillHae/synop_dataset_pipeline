@@ -113,58 +113,96 @@ class NumericalChecker:
         }
     
     def check_stationarity(self, data: xr.DataArray, var_name: str) -> Dict:
-        """Test for stationarity using ADF and KPSS tests."""
+        """Test inter-annual consistency for atmospheric data."""
         if 'time' not in data.dims:
             return {
                 'stationarity_check': False,
                 'message': 'No time dimension found'
             }
         
-        if len(data.dims) > 1:
-            if 'station_id' in data.dims:
-                data_1d = data.mean(dim='station_id')
-            else:
-                data_1d = data
-        else:
-            data_1d = data
-        
-        valid_data = data_1d.values[~np.isnan(data_1d.values)]
-        if len(valid_data) < 50:
+        if 'station_id' not in data.dims:
             return {
                 'stationarity_check': False,
-                'message': 'Insufficient data for stationarity tests (need >= 50 points)'
+                'message': 'No station_id dimension - need per-station analysis'
             }
         
         try:
-            # Augmented Dickey-Fuller test (null hypothesis: non-stationary)
-            adf_result = adfuller(valid_data, autolag='AIC')
-            adf_statistic = float(adf_result[0])
-            adf_pvalue = float(adf_result[1])
-            adf_stationary = adf_pvalue < 0.05
-            
-            # KPSS test (null hypothesis: stationary)
-            kpss_result = kpss(valid_data, regression='c', nlags='auto')
-            kpss_statistic = float(kpss_result[0])
-            kpss_pvalue = float(kpss_result[1])
-            kpss_stationary = kpss_pvalue > 0.05
-            
-            is_stationary = adf_stationary and kpss_stationary
-            return {
-                'stationarity_check': True,
-                'adf_statistic': adf_statistic,
-                'adf_pvalue': adf_pvalue,
-                'adf_stationary': adf_stationary,
-                'kpss_statistic': kpss_statistic,
-                'kpss_pvalue': kpss_pvalue,
-                'kpss_stationary': kpss_stationary,
-                'is_stationary': is_stationary,
-                'has_issues': not is_stationary
-            }
+            times = pd.to_datetime(data.coords['time'].values)
+            years = times.year.unique()
+            if len(years) < 2:
+                return {
+                    'stationarity_check': False,
+                    'message': 'Need at least 2 years of data for inter-annual comparison'
+                }
+
         except Exception as e:
             return {
                 'stationarity_check': False,
-                'message': f'Error in stationarity tests: {str(e)}'
+                'message': f'Error extracting years: {str(e)}'
             }
+        
+        station_year_stats = []
+        n_stations = data.shape[0]
+        for station_idx in range(n_stations):
+            station_data = data.values[station_idx, :]
+            station_times = pd.to_datetime(data.coords['time'].values)
+            year_means = []
+            year_stds = []
+            for year in years:
+                year_mask = station_times.year == year
+                year_data = station_data[year_mask]
+                valid_data = year_data[~np.isnan(year_data)]
+                if len(valid_data) >= 30:
+                    year_means.append(np.mean(valid_data))
+                    year_stds.append(np.std(valid_data))
+            
+            if len(year_means) >= 2:
+                station_year_stats.append({
+                    'means': year_means,
+                    'stds': year_stds
+                })
+        
+        if len(station_year_stats) < 2:
+            return {
+                'stationarity_check': False,
+                'message': 'Insufficient stations with multi-year data'
+            }
+        
+        # Calculate coefficient of variation (CV) for means and stds across years
+        # CV = std / mean - measures relative variability
+        mean_cvs = []
+        std_cvs = []
+        for stats in station_year_stats:
+            if len(stats['means']) >= 2:
+                mean_of_means = np.mean(stats['means'])
+                std_of_means = np.std(stats['means'])
+                if mean_of_means != 0:
+                    mean_cvs.append(std_of_means / abs(mean_of_means))
+                
+                mean_of_stds = np.mean(stats['stds'])
+                std_of_stds = np.std(stats['stds'])
+                if mean_of_stds != 0:
+                    std_cvs.append(std_of_stds / mean_of_stds)
+        
+        if not mean_cvs:
+            return {
+                'stationarity_check': False,
+                'message': 'Could not calculate inter-annual variability'
+            }
+        
+        avg_mean_cv = np.mean(mean_cvs)
+        avg_std_cv = np.mean(std_cvs)
+        # Flag as issue if CV is very high (>0.3 = 30% variation year-to-year)
+        has_issues = avg_mean_cv > 0.3 or avg_std_cv > 0.3
+        return {
+            'stationarity_check': True,
+            'n_years': len(years),
+            'n_stations_analyzed': len(station_year_stats),
+            'mean_cv': float(avg_mean_cv),  # Coefficient of variation for yearly means
+            'std_cv': float(avg_std_cv),    # Coefficient of variation for yearly stds
+            'has_issues': has_issues,
+            'interpretation': 'High CV indicates inconsistent statistics across years (sensor drift/climate trend)'
+        }
     
     def check_variance_homogeneity(self, data: xr.DataArray, var_name: str) -> Dict:
         """Test for variance homogeneity across stations using Levene's test."""
@@ -485,9 +523,10 @@ class NumericalChecker:
                     if var_results.get('stationarity_check', {}).get('has_issues'):
                         sc = var_results['stationarity_check']
                         if sc.get('stationarity_check'):
-                            print(f"      Non-stationary time series")
-                            print(f"        ADF p-value: {sc.get('adf_pvalue', 'N/A'):.4f}, "
-                                  f"KPSS p-value: {sc.get('kpss_pvalue', 'N/A'):.4f}")
+                            print(f"      High inter-annual variability detected")
+                            print(f"        Mean CV: {sc.get('mean_cv', 'N/A'):.3f}, "
+                                  f"Std CV: {sc.get('std_cv', 'N/A'):.3f} "
+                                  f"(across {sc.get('n_years', 'N/A')} years)")
                     
                     if var_results.get('variance_check', {}).get('has_issues'):
                         vc = var_results['variance_check']
@@ -606,33 +645,37 @@ class NumericalChecker:
                 sc = var_results.get('stationarity_check', {})
                 if sc.get('stationarity_check'):
                     if var_name not in stationarity_data:
-                        stationarity_data[var_name] = {'stationary': 0, 'non_stationary': 0}
+                        stationarity_data[var_name] = {'mean_cvs': [], 'std_cvs': []}
                     
-                    if sc.get('is_stationary'):
-                        stationarity_data[var_name]['stationary'] += 1
-                    else:
-                        stationarity_data[var_name]['non_stationary'] += 1
+                    # Collect CV values
+                    if 'mean_cv' in sc:
+                        stationarity_data[var_name]['mean_cvs'].append(sc['mean_cv'])
+                    if 'std_cv' in sc:
+                        stationarity_data[var_name]['std_cvs'].append(sc['std_cv'])
         
         if not stationarity_data:
             print("  No stationarity data to plot")
             return
         
-        non_stationary_pct = {}
+        # Calculate average CV across files
+        avg_mean_cvs = {}
         for var, data in stationarity_data.items():
-            total = data['stationary'] + data['non_stationary']
-            if total > 0:
-                non_stationary_pct[var] = (data['non_stationary'] / total) * 100
+            if data['mean_cvs']:
+                avg_mean_cvs[var] = np.mean(data['mean_cvs'])
         
         plt.figure(figsize=(12, 6))
-        vars_sorted = sorted(non_stationary_pct.keys(), key=lambda x: non_stationary_pct[x], reverse=True)
-        values = [non_stationary_pct[v] for v in vars_sorted]
-        colors = ['#d73027' if v > 50 else '#fee08b' if v > 20 else '#1a9850' for v in values]
+        vars_sorted = sorted(avg_mean_cvs.keys(), key=lambda x: avg_mean_cvs[x], reverse=True)
+        values = [avg_mean_cvs[v] for v in vars_sorted]
+        colors = ['#d73027' if v > 0.3 else '#fee08b' if v > 0.15 else '#1a9850' for v in values]
         
         plt.bar(range(len(vars_sorted)), values, color=colors)
         plt.xticks(range(len(vars_sorted)), vars_sorted, rotation=45, ha='right')
         plt.xlabel('Variable', fontsize=12)
-        plt.ylabel('Non-Stationary Files (%)', fontsize=12)
-        plt.title('Stationarity Test Results (ADF + KPSS)', fontsize=14, fontweight='bold')
+        plt.ylabel('Coefficient of Variation (Mean)', fontsize=12)
+        plt.title('Inter-Annual Consistency: CV of Yearly Means', fontsize=14, fontweight='bold')
+        plt.axhline(y=0.15, color='orange', linestyle='--', alpha=0.5, label='Moderate variability')
+        plt.axhline(y=0.30, color='red', linestyle='--', alpha=0.5, label='High variability')
+        plt.legend()
         plt.grid(axis='y', linestyle='--', alpha=0.3)
         plt.tight_layout()
         plt.savefig(f"{output_dir}/stationarity_results.png", dpi=300)
@@ -947,6 +990,7 @@ class NumericalApplier:
             for var_name, var_data in stats.items():
                 if var_name not in var_stats:
                     var_stats[var_name] = {'removed': 0, 'original': 0}
+                    
                 var_stats[var_name]['removed'] += var_data['removed']
                 var_stats[var_name]['original'] += var_data['original_valid']
         
