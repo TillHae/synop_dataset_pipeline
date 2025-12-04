@@ -29,6 +29,7 @@ import sys
 from pathlib import Path
 from datetime import datetime
 import subprocess
+import os
 
 
 class DataPipeline:
@@ -55,10 +56,15 @@ class DataPipeline:
             self.log(f"Script not found: {script_name}", "ERROR")
             return False
         
+        # Add base_dir to PYTHONPATH so scripts can import from root (e.g. utils)
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(self.base_dir) + os.pathsep + env.get("PYTHONPATH", "")
+        
         try:
             result = subprocess.run(
                 [sys.executable, str(script_path)],
                 cwd=str(self.base_dir),
+                env=env,
                 capture_output=True,
                 text=True,
                 check=True
