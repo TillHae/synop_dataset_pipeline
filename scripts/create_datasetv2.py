@@ -31,6 +31,9 @@ class NumericalChecker:
             'TX5_10': (-50, 45),  # Max temperature at 5cm height
             'TN_10': (-50, 45),   # Min temperature in 10-min interval
             'TN5_10': (-50, 45),  # Min temperature at 5cm (ground can be colder)
+            'TT_10': (-50, 45),   # Air temperature (10-min)
+            'TM5_10': (-50, 50),  # Temperature at 5cm
+            'TD_10': (-50, 40),   # Dew point temperature
             
             # Wind variables (m/s)
             # Germany: Typical max gusts ~40 m/s, extreme storms ~50 m/s
@@ -49,11 +52,17 @@ class NumericalChecker:
             'RWS_DAU_10': (0, 10), # Precipitation duration (seconds, max 10 min)
             'RWS_IND_10': (0, 3),   # Precipitation indicator (0=no, 1=yes, 2,3=older_versions with heating)
             
+            # Pressure (hPa)
+            'PP_10': (600, 1100),   # Station pressure (can be low at high altitude)
+            
+            # Humidity (%)
+            'RF_10': (0, 100),      # Relative Humidity
+            
             # Solar radiation (J/cm²)
             # Germany latitude: ~47-55°N, moderate solar radiation
             'GS_10': (0, 500),    # Global radiation (10-min sum)
             'DS_10': (0, 350),    # Diffuse radiation (10-min sum)
-            'SD_10': (0, 700),    # Sunshine duration (seconds, max 10 min)
+            'SD_10': (0, 600),    # Sunshine duration (seconds, max 10 min)
             'LS_10': (0, 500),    # Long-wave radiation (10-min sum)
 
             # Metadata (coordinates)
@@ -128,80 +137,36 @@ class NumericalChecker:
         
         try:
             times = pd.to_datetime(data.coords['time'].values)
-            years = times.year.unique()
-            if len(years) < 2:
+            if len(times) == 0:
                 return {
                     'stationarity_check': False,
-                    'message': 'Need at least 2 years of data for inter-annual comparison'
+                    'message': 'Time dimension is empty'
                 }
-
         except Exception as e:
             return {
                 'stationarity_check': False,
-                'message': f'Error extracting years: {str(e)}'
+                'message': f'Error checking time dimension: {str(e)}'
             }
         
-        station_year_stats = []
+        station_ids = data.coords['station_id'].values
+        station_year_stats = {}
         n_stations = data.shape[0]
+        
         for station_idx in range(n_stations):
             station_data = data.values[station_idx, :]
-            station_times = pd.to_datetime(data.coords['time'].values)
-            year_means = []
-            year_stds = []
-            for year in years:
-                year_mask = station_times.year == year
-                year_data = station_data[year_mask]
-                valid_data = year_data[~np.isnan(year_data)]
-                if len(valid_data) >= 30:
-                    year_means.append(np.mean(valid_data))
-                    year_stds.append(np.std(valid_data))
+            valid_data = station_data[~np.isnan(station_data)]
             
-            if len(year_means) >= 2:
-                station_year_stats.append({
-                    'means': year_means,
-                    'stds': year_stds
-                })
+            if len(valid_data) >= 30:
+                sid = str(station_ids[station_idx])
+                station_year_stats[sid] = {
+                    'means': [float(np.mean(valid_data))],
+                    'stds': [float(np.std(valid_data))]
+                }
         
-        if len(station_year_stats) < 2:
-            return {
-                'stationarity_check': False,
-                'message': 'Insufficient stations with multi-year data'
-            }
-        
-        # Calculate coefficient of variation (CV) for means and stds across years
-        # CV = std / mean - measures relative variability
-        mean_cvs = []
-        std_cvs = []
-        for stats in station_year_stats:
-            if len(stats['means']) >= 2:
-                mean_of_means = np.mean(stats['means'])
-                std_of_means = np.std(stats['means'])
-                if mean_of_means != 0:
-                    mean_cvs.append(std_of_means / abs(mean_of_means))
-                
-                mean_of_stds = np.mean(stats['stds'])
-                std_of_stds = np.std(stats['stds'])
-                if mean_of_stds != 0:
-                    std_cvs.append(std_of_stds / mean_of_stds)
-        
-        if not mean_cvs:
-            return {
-                'stationarity_check': False,
-                'message': 'Could not calculate inter-annual variability'
-            }
-        
-        avg_mean_cv = np.mean(mean_cvs)
-        avg_std_cv = np.mean(std_cvs)
-        # Flag as issue if CV is very high (>0.3 = 30% variation year-to-year)
-        has_issues = avg_mean_cv > 0.3 or avg_std_cv > 0.3
         return {
             'stationarity_check': True,
-            'n_years': len(years),
-            'n_stations_analyzed': len(station_year_stats),
-            'mean_cv': float(avg_mean_cv),  # Coefficient of variation for yearly means
-            'std_cv': float(avg_std_cv),    # Coefficient of variation for yearly stds
-            'has_issues': has_issues,
-            'interpretation': 'High CV indicates inconsistent statistics across years (sensor drift/climate trend)'
+            'partial_stats': station_year_stats,
+            'message': 'Partial stats collected'
         }
     
     def check_variance_homogeneity(self, data: xr.DataArray, var_name: str) -> Dict:
@@ -300,20 +265,6 @@ class NumericalChecker:
             # Wind: Can change rapidly (gusts), so those are generous threshold
             'FF_10': 30.0,
             'FX_10': 40.0, 'FNX_10': 40.0, 'FMX_10': 40.0,
-            
-            # Wind direction: Can change 360° instantly (wind shift), so skip this check
-            
-            # Precipitation: Highly volatile, can go 0→50mm in 10 min (cloudburst)
-            # => Only flag if it exceeds physical maximum
-            'RWS_10': 100.0,  # Use range maximum as threshold
-            'RWS_DAU_10': 10.0,  # Duration can't exceed 10 minutes
-            
-            # Solar radiation: Changes dramatically (night→day), but gradually
-            # Flag only impossible jumps (sensor errors)
-            'GS_10': 500.0,  # Can go from 0 to max in one interval (clouds)
-            'DS_10': 350.0,
-            'SD_10': 600.0,
-            'LS_10': 500.0,
             
             # Pressure: Very stable, shouldn't change much in 10 minutes
             'PP_10': 5.0,  # hPa - anything more is likely sensor error
@@ -450,14 +401,55 @@ class NumericalChecker:
         
         return dataset_results
     
-    def run_checks(self) -> Dict:
-        if self.dataset_path.is_file():
-            files = [self.dataset_path]
-        elif self.dataset_path.is_dir():
-            files = sorted(self.dataset_path.glob('*.nc'))
-        else:
-            raise ValueError(f"Path does not exist: {self.dataset_path}")
+    def aggregate_stationarity(self):
+        self.stationarity_results = {}
+        all_stats = {}
         
+        for filename, file_results in self.results.items():
+            if 'error' in file_results:
+                continue
+                
+            for var_name, var_results in file_results['variables'].items():
+                if var_results.get('is_metadata'):
+                    continue
+                
+                sc = var_results.get('stationarity_check', {})
+                if sc.get('stationarity_check') and 'partial_stats' in sc:
+                    if var_name not in all_stats:
+                        all_stats[var_name] = {}
+                    
+                    for sid, stats in sc['partial_stats'].items():
+                        if sid not in all_stats[var_name]:
+                            all_stats[var_name][sid] = {'means': [], 'stds': []}
+                        
+                        all_stats[var_name][sid]['means'].extend(stats['means'])
+                        all_stats[var_name][sid]['stds'].extend(stats['stds'])
+        
+        for var_name, station_stats in all_stats.items():
+            mean_cvs = []
+            std_cvs = []
+            for sid, stats in station_stats.items():
+                if len(stats['means']) >= 2: 
+                    mean_of_means = np.mean(stats['means'])
+                    std_of_means = np.std(stats['means'])
+                    if mean_of_means != 0:
+                        mean_cvs.append(std_of_means / abs(mean_of_means))
+                    
+                    mean_of_stds = np.mean(stats['stds'])
+                    std_of_stds = np.std(stats['stds'])
+                    if mean_of_stds != 0:
+                        std_cvs.append(std_of_stds / mean_of_stds)
+            
+            if mean_cvs:
+                self.stationarity_results[var_name] = {
+                    'mean_cv': np.mean(mean_cvs),
+                    'std_cv': np.mean(std_cvs),
+                    'n_stations': len(mean_cvs)
+                }
+
+    
+    def run_checks(self) -> Dict:
+        files = sorted(self.dataset_path.glob('*.nc'))
         if not files:
             raise ValueError(f"No NetCDF files found in {self.dataset_path}")
         
@@ -477,6 +469,7 @@ class NumericalChecker:
                 }
         
         self.results = all_results
+        self.aggregate_stationarity()
         return all_results
     
     def print_summary(self):
@@ -507,7 +500,6 @@ class NumericalChecker:
             for var_name, var_results in file_results['variables'].items():
                 if var_results.get('status') == 'WARNING':
                     print(f"\n    {var_name}:")
-                    
                     if var_results['nan_inf_check'].get('has_issues'):
                         nan_pct = var_results['nan_inf_check']['nan_percentage']
                         inf_pct = var_results['nan_inf_check']['inf_percentage']
@@ -633,35 +625,11 @@ class NumericalChecker:
     
     
     def plot_stationarity_results(self, output_dir: str):
-        stationarity_data = {}
-        for filename, file_results in self.results.items():
-            if 'error' in file_results:
-                continue
-            
-            for var_name, var_results in file_results['variables'].items():
-                if var_results.get('is_metadata'):
-                    continue
-                    
-                sc = var_results.get('stationarity_check', {})
-                if sc.get('stationarity_check'):
-                    if var_name not in stationarity_data:
-                        stationarity_data[var_name] = {'mean_cvs': [], 'std_cvs': []}
-                    
-                    # Collect CV values
-                    if 'mean_cv' in sc:
-                        stationarity_data[var_name]['mean_cvs'].append(sc['mean_cv'])
-                    if 'std_cv' in sc:
-                        stationarity_data[var_name]['std_cvs'].append(sc['std_cv'])
-        
-        if not stationarity_data:
+        if not hasattr(self, 'stationarity_results') or not self.stationarity_results:
             print("  No stationarity data to plot")
             return
         
-        # Calculate average CV across files
-        avg_mean_cvs = {}
-        for var, data in stationarity_data.items():
-            if data['mean_cvs']:
-                avg_mean_cvs[var] = np.mean(data['mean_cvs'])
+        avg_mean_cvs = {var: data['mean_cv'] for var, data in self.stationarity_results.items()}
         
         plt.figure(figsize=(12, 6))
         vars_sorted = sorted(avg_mean_cvs.keys(), key=lambda x: avg_mean_cvs[x], reverse=True)

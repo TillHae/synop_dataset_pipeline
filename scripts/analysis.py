@@ -1,6 +1,7 @@
 from utils import create_df
 import matplotlib.pyplot as plt
 import pandas as pd
+import os
 
 folds = ["air_temp", "ex_temp", "ex_wind", "precip", "solar", "wind"]
 
@@ -13,6 +14,7 @@ def station_duration(df):
     return year_counts
 
 def plot_station_duration(total_year_counts):
+    os.makedirs("plots/v1", exist_ok=True)
     plt.figure(figsize=(10, 6))
     bottoms = None 
     sorted_keys = sorted(total_year_counts.keys())

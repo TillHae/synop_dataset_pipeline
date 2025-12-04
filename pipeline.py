@@ -103,7 +103,8 @@ class DataPipeline:
             "scripts/create_datasetv1.py",
             "scripts/create_datasetv2.py",
             "scripts/create_datasetv3.py",
-            "scripts/create_datasetv4.py"
+            "scripts/create_datasetv4.py",
+            "scripts/analysis.py"
         ]
         
         missing_scripts = []
@@ -140,6 +141,12 @@ class DataPipeline:
         self.log("  - Incorrect content detection and fixing", "INFO")
         self.log("  - Station file concatenation", "INFO")
         return self.run_script("scripts/pre-process.py", "Pre-process raw data")
+    
+    def step_analysis(self) -> bool:
+        self.log("=" * 80, "INFO")
+        self.log("STEP 3b: Analyzing Data (Station Durations)", "STEP")
+        self.log("=" * 80, "INFO")
+        return self.run_script("scripts/analysis.py", "Analyze station durations")
     
     def step_create_v1(self) -> bool:
         self.log("=" * 80, "INFO")
@@ -191,6 +198,7 @@ class DataPipeline:
             ("Scratch Data", self.step_scratch_data),
             ("Scratch Metadata", self.step_scratch_metadata),
             ("Pre-process", self.step_preprocess),
+            ("Analysis", self.step_analysis),
             ("Create v1", self.step_create_v1),
             ("Create v2", self.step_create_v2),
             ("Create v3", self.step_create_v3),
@@ -220,6 +228,7 @@ class DataPipeline:
             ],
             "preprocess": [
                 ("Pre-process", self.step_preprocess),
+                ("Analysis", self.step_analysis),
                 ("Create v1", self.step_create_v1),
                 ("Create v2", self.step_create_v2),
                 ("Create v3", self.step_create_v3),
