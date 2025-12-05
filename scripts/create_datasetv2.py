@@ -4,6 +4,8 @@ from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 
 import matplotlib.pyplot as plt
+from matplotlib.patches import Patch
+from matplotlib.lines import Line2D
 import numpy as np
 import pandas as pd
 import xarray as xr
@@ -32,8 +34,8 @@ class NumericalChecker:
             'TN_10': (-50, 45),   # Min temperature in 10-min interval
             'TN5_10': (-50, 45),  # Min temperature at 5cm (ground can be colder)
             'TT_10': (-50, 45),   # Air temperature (10-min)
-            'TM5_10': (-50, 50),  # Temperature at 5cm
-            'TD_10': (-50, 40),   # Dew point temperature
+            'TM5_10': (-50, 45),  # Temperature at 5cm
+            'TD_10': (-10, 30),   # Dew point temperature
             
             # Wind variables (m/s)
             # Germany: Typical max gusts ~40 m/s, extreme storms ~50 m/s
@@ -56,7 +58,7 @@ class NumericalChecker:
             'PP_10': (600, 1100),   # Station pressure (can be low at high altitude)
             
             # Humidity (%)
-            'RF_10': (0, 100),      # Relative Humidity
+            'RF_10': (5, 100),      # Relative Humidity
             
             # Solar radiation (J/cm²)
             # Germany latitude: ~47-55°N, moderate solar radiation
@@ -548,6 +550,7 @@ class NumericalChecker:
         self.plot_stationarity_results(output_dir)
         self.plot_variance_results(output_dir)
         self.plot_range_violations(output_dir)
+        self.plot_distribution_results(output_dir)
         
         print(f"All plots saved to {output_dir}/")
     
@@ -737,6 +740,170 @@ class NumericalChecker:
         plt.savefig(f"{output_dir}/range_violations.png", dpi=300)
         plt.close()
         print(f"  Saved range_violations.png")
+    
+    def plot_distribution_results(self, output_dir: str):
+        """Create comprehensive plots for distribution check results."""
+        distribution_data = {
+            'ks_pvalue': {},
+            'is_normal': {},
+            'skewness': {},
+            'kurtosis': {}
+        }
+        
+        # Collect distribution data from all files
+        for filename, file_results in self.results.items():
+            if 'error' in file_results:
+                continue
+            
+            for var_name, var_results in file_results['variables'].items():
+                if var_results.get('is_metadata'):
+                    continue
+                    
+                dc = var_results.get('distribution_check', {})
+                if dc.get('distribution_check'):
+                    if var_name not in distribution_data['ks_pvalue']:
+                        distribution_data['ks_pvalue'][var_name] = []
+                        distribution_data['is_normal'][var_name] = []
+                        distribution_data['skewness'][var_name] = []
+                        distribution_data['kurtosis'][var_name] = []
+                    
+                    distribution_data['ks_pvalue'][var_name].append(dc.get('ks_pvalue', 0))
+                    distribution_data['is_normal'][var_name].append(dc.get('is_normal', False))
+                    distribution_data['skewness'][var_name].append(dc.get('skewness', 0))
+                    distribution_data['kurtosis'][var_name].append(dc.get('kurtosis', 0))
+        
+        if not distribution_data['ks_pvalue']:
+            print("  No distribution data to plot")
+            return
+        
+        fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+        fig.suptitle('Distribution Analysis Results', fontsize=16, fontweight='bold', y=0.995)
+        
+        # Panel 1: Normality Test Results (KS p-values)
+        ax1 = axes[0, 0]
+        avg_pvalues = {var: np.mean(pvals) for var, pvals in distribution_data['ks_pvalue'].items()}
+        vars_sorted = sorted(avg_pvalues.keys(), key=lambda x: avg_pvalues[x])
+        values = [avg_pvalues[v] for v in vars_sorted]
+        colors = ['#1a9850' if v > 0.05 else '#d73027' for v in values]
+        
+        ax1.barh(vars_sorted, values, color=colors)
+        ax1.axvline(x=0.05, color='black', linestyle='--', alpha=0.5, label='α = 0.05')
+        ax1.set_xlabel('KS Test p-value', fontsize=11)
+        ax1.set_ylabel('Variable', fontsize=11)
+        ax1.set_title('Normality Test (Kolmogorov-Smirnov)', fontsize=12, fontweight='bold')
+        ax1.legend()
+        ax1.grid(axis='x', linestyle='--', alpha=0.3)
+        
+        # Panel 2: Percentage of Normal Distributions
+        ax2 = axes[0, 1]
+        normal_percentages = {
+            var: (sum(is_norm) / len(is_norm) * 100) 
+            for var, is_norm in distribution_data['is_normal'].items()
+        }
+        vars_sorted2 = sorted(normal_percentages.keys(), key=lambda x: normal_percentages[x], reverse=True)
+        values2 = [normal_percentages[v] for v in vars_sorted2]
+        colors2 = ['#1a9850' if v > 80 else '#fee08b' if v > 50 else '#d73027' for v in values2]
+        
+        ax2.bar(range(len(vars_sorted2)), values2, color=colors2)
+        ax2.set_xticks(range(len(vars_sorted2)))
+        ax2.set_xticklabels(vars_sorted2, rotation=45, ha='right')
+        ax2.set_ylabel('Normal Distribution (%)', fontsize=11)
+        ax2.set_xlabel('Variable', fontsize=11)
+        ax2.set_title('Percentage of Files with Normal Distribution', fontsize=12, fontweight='bold')
+        ax2.axhline(y=50, color='orange', linestyle='--', alpha=0.5, label='50% threshold')
+        ax2.axhline(y=80, color='green', linestyle='--', alpha=0.5, label='80% threshold')
+        ax2.legend()
+        ax2.grid(axis='y', linestyle='--', alpha=0.3)
+        ax2.set_ylim(0, 100)
+        
+        # Panel 3: Skewness
+        ax3 = axes[1, 0]
+        avg_skewness = {var: np.mean(skews) for var, skews in distribution_data['skewness'].items()}
+        vars_sorted3 = sorted(avg_skewness.keys(), key=lambda x: abs(avg_skewness[x]), reverse=True)
+        values3 = [avg_skewness[v] for v in vars_sorted3]
+        colors3 = ['#1a9850' if abs(v) < 0.5 else '#fee08b' if abs(v) < 1.0 else '#d73027' for v in values3]
+        
+        ax3.barh(vars_sorted3, values3, color=colors3)
+        ax3.axvline(x=0, color='black', linestyle='-', alpha=0.3)
+        ax3.axvline(x=-0.5, color='orange', linestyle='--', alpha=0.5)
+        ax3.axvline(x=0.5, color='orange', linestyle='--', alpha=0.5, label='Moderate skew (±0.5)')
+        ax3.axvline(x=-1.0, color='red', linestyle='--', alpha=0.5)
+        ax3.axvline(x=1.0, color='red', linestyle='--', alpha=0.5, label='High skew (±1.0)')
+        ax3.set_xlabel('Skewness', fontsize=11)
+        ax3.set_ylabel('Variable', fontsize=11)
+        ax3.set_title('Distribution Skewness (Asymmetry)', fontsize=12, fontweight='bold')
+        ax3.legend(loc='lower right')
+        ax3.grid(axis='x', linestyle='--', alpha=0.3)
+        
+        # Panel 4: Kurtosis
+        ax4 = axes[1, 1]
+        avg_kurtosis = {var: np.mean(kurts) for var, kurts in distribution_data['kurtosis'].items()}
+        vars_sorted4 = sorted(avg_kurtosis.keys(), key=lambda x: abs(avg_kurtosis[x]), reverse=True)
+        values4 = [avg_kurtosis[v] for v in vars_sorted4]
+        colors4 = ['#1a9850' if abs(v) < 1.0 else '#fee08b' if abs(v) < 3.0 else '#d73027' for v in values4]
+        
+        ax4.barh(vars_sorted4, values4, color=colors4)
+        ax4.axvline(x=0, color='black', linestyle='-', alpha=0.3, label='Normal (0)')
+        ax4.axvline(x=-1.0, color='orange', linestyle='--', alpha=0.5)
+        ax4.axvline(x=1.0, color='orange', linestyle='--', alpha=0.5, label='Moderate (±1.0)')
+        ax4.axvline(x=-3.0, color='red', linestyle='--', alpha=0.5)
+        ax4.axvline(x=3.0, color='red', linestyle='--', alpha=0.5, label='High (±3.0)')
+        ax4.set_xlabel('Excess Kurtosis', fontsize=11)
+        ax4.set_ylabel('Variable', fontsize=11)
+        ax4.set_title('Distribution Kurtosis (Tail Heaviness)', fontsize=12, fontweight='bold')
+        ax4.legend(loc='lower right')
+        ax4.grid(axis='x', linestyle='--', alpha=0.3)
+        
+        plt.tight_layout()
+        plt.savefig(f"{output_dir}/distribution_analysis.png", dpi=300, bbox_inches='tight')
+        plt.close()
+        print(f"  Saved distribution_analysis.png")
+        
+        fig2, ax = plt.subplots(figsize=(12, 8))
+
+        for var_name in distribution_data['skewness'].keys():
+            skew_vals = distribution_data['skewness'][var_name]
+            kurt_vals = distribution_data['kurtosis'][var_name]
+            avg_skew = np.mean(skew_vals)
+            avg_kurt = np.mean(kurt_vals)
+            is_normal_pct = sum(distribution_data['is_normal'][var_name]) / len(distribution_data['is_normal'][var_name]) * 100
+            if is_normal_pct > 80:
+                color = '#1a9850'
+                marker = 'o'
+            elif is_normal_pct > 50:
+                color = '#fee08b'
+                marker = 's'
+            else:
+                color = '#d73027'
+                marker = '^'
+            
+            ax.scatter(avg_skew, avg_kurt, s=150, c=color, marker=marker, alpha=0.7, edgecolors='black', linewidth=1.5)
+            ax.annotate(var_name, (avg_skew, avg_kurt), fontsize=9, xytext=(5, 5), textcoords='offset points', alpha=0.8)
+        
+        ax.axhline(y=0, color='gray', linestyle='-', alpha=0.3)
+        ax.axvline(x=0, color='gray', linestyle='-', alpha=0.3)
+        ax.axhspan(-1, 1, alpha=0.1, color='green', label='Normal kurtosis range')
+        ax.axvspan(-0.5, 0.5, alpha=0.1, color='green')
+        legend_elements = [
+            Line2D([0], [0], marker='o', color='w', markerfacecolor='#1a9850', 
+                   markersize=10, label='Normal (>80%)'),
+            Line2D([0], [0], marker='s', color='w', markerfacecolor='#fee08b', 
+                   markersize=10, label='Moderate (50-80%)'),
+            Line2D([0], [0], marker='^', color='w', markerfacecolor='#d73027', 
+                   markersize=10, label='Non-normal (<50%)')
+        ]
+        
+        ax.set_xlabel('Skewness (Asymmetry)', fontsize=12, fontweight='bold')
+        ax.set_ylabel('Excess Kurtosis (Tail Heaviness)', fontsize=12, fontweight='bold')
+        ax.set_title('Distribution Shape Analysis: Skewness vs Kurtosis', 
+                    fontsize=14, fontweight='bold')
+        ax.legend(handles=legend_elements, loc='best', fontsize=10)
+        ax.grid(True, linestyle='--', alpha=0.3)
+        
+        plt.tight_layout()
+        plt.savefig(f"{output_dir}/distribution_shape_analysis.png", dpi=300, bbox_inches='tight')
+        plt.close()
+        print(f"  Saved distribution_shape_analysis.png")
     
     def save_report(self, output_path: str = "numerical_checks_report.txt"):
         with open(output_path, 'w') as f:
