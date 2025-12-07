@@ -7,3 +7,4 @@ numpy
 netCDF4
 scipy
 statsmodels
+cartopy

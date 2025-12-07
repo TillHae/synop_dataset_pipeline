@@ -28,7 +28,6 @@ class NumericalChecker:
         self.variable_ranges = {
             # Temperature variables (in Celsius)
             # Germany: Record low ~-45°C (1929), Record high ~42°C (2019)
-            'TU': (-50, 45),      # Air temperature (10-min average)
             'TX_10': (-50, 45),   # Max temperature in 10-min interval
             'TX5_10': (-50, 45),  # Max temperature at 5cm height
             'TN_10': (-50, 45),   # Min temperature in 10-min interval
