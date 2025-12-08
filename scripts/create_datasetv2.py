@@ -686,6 +686,7 @@ class NumericalChecker:
         plt.xlabel('Variable', fontsize=12)
         plt.ylabel('Variance Ratio (Max/Min)', fontsize=12)
         plt.title('Variance Homogeneity Across Stations (Levene Test)', fontsize=14, fontweight='bold')
+        plt.yscale('log')
         plt.grid(axis='y', linestyle='--', alpha=0.3)
         plt.axhline(y=5, color='orange', linestyle='--', alpha=0.5, label='Moderate heterogeneity')
         plt.axhline(y=10, color='red', linestyle='--', alpha=0.5, label='High heterogeneity')
