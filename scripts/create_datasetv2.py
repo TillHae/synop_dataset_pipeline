@@ -34,7 +34,7 @@ class NumericalChecker:
             'TN5_10': (-50, 45),  # Min temperature at 5cm (ground can be colder)
             'TT_10': (-50, 45),   # Air temperature (10-min)
             'TM5_10': (-50, 45),  # Temperature at 5cm
-            'TD_10': (-10, 30),   # Dew point temperature
+            'TD_10': (-15, 35),   # Dew point temperature
             
             # Wind variables (m/s)
             # Germany: Typical max gusts ~40 m/s, extreme storms ~50 m/s
