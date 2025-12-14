@@ -97,13 +97,13 @@ def plot_removal_summary(global_nan_percentages: dict, vars_to_remove: dict,
     values = [vars_to_remove[v] for v in vars_sorted]
     
     plt.barh(range(len(vars_sorted)), values, color='#d73027')
-    plt.yticks(range(len(vars_sorted)), vars_sorted, fontsize=24)
+    plt.yticks(range(len(vars_sorted)), vars_sorted)
     plt.xlabel('Global NaN Percentage (%)', fontsize=24)
     plt.ylabel('Variable', fontsize=24)
     # plt.title(f'Variables Removed Due to High Missing Data (>{threshold}% NaN Globally)', fontsize=14, fontweight='bold')
     plt.axvline(x=threshold, color='black', linestyle='--', linewidth=2, label=f'{threshold}% threshold')
-    plt.tick_params(axis='both', which='major', labelsize=24)
-    plt.legend(fontsize=24)
+    plt.tick_params(axis='both', which='major')
+    plt.legend()
     plt.grid(axis='x', linestyle='--', alpha=0.3)
     plt.tight_layout()
     plt.savefig(f"{output_dir}/removed_variables.png", dpi=300)
@@ -116,7 +116,7 @@ def plot_removal_summary(global_nan_percentages: dict, vars_to_remove: dict,
     colors = ['#d73027' if v > threshold else '#1a9850' for v in all_values]
     
     plt.barh(range(len(all_vars_sorted)), all_values, color=colors)
-    plt.yticks(range(len(all_vars_sorted)), all_vars_sorted, fontsize=24)
+    plt.yticks(range(len(all_vars_sorted)), all_vars_sorted)
     plt.xlabel('Global NaN Percentage (%)', fontsize=24)
     plt.ylabel('Variable', fontsize=24)
     # plt.title('Global NaN Percentage for All Variables (Red = Removed, Green = Kept)', fontsize=14, fontweight='bold')

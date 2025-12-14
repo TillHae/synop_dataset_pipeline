@@ -62,8 +62,6 @@ def plot_stations_on_map(metadata, output_path="plots/stations_map.png"):
     )
     gl.top_labels = False
     gl.right_labels = False
-    gl.xlabel_style = {'size': 24}
-    gl.ylabel_style = {'size': 24}
     
     scatter = ax.scatter(
         metadata['longitude'],
@@ -81,7 +79,7 @@ def plot_stations_on_map(metadata, output_path="plots/stations_map.png"):
     # Add colorbar for elevation
     cbar = plt.colorbar(scatter, ax=ax, orientation='horizontal', pad=0.05, shrink=0.8)
     cbar.set_label('Station Elevation (m)', fontsize=24)
-    cbar.ax.tick_params(labelsize=24)
+    cbar.ax.tick_params()
     
     # plt.title(
     #     f'DWD Weather Stations in Germany\n({len(metadata)} stations)',
