@@ -31,11 +31,11 @@ def plot_station_duration(total_year_counts):
         
         bottoms = bottoms.add(current_data, fill_value=0)
     
-    plt.xlabel("Station Duration (Years)", fontsize=48)
-    plt.ylabel("Number of Stations", fontsize=48)
+    plt.xlabel("Station Duration (Years)", fontsize=24)
+    plt.ylabel("Number of Stations", fontsize=24)
     # plt.title("Temporal Coverage of Weather Stations by Variable Category", fontsize=14, fontweight='bold')
-    plt.tick_params(axis='both', which='major', labelsize=48)
-    plt.legend(title='Variable Category', fontsize=48, title_fontsize=48)
+    plt.tick_params(axis='both', which='major', labelsize=24)
+    plt.legend(title='Variable Category', fontsize=24, title_fontsize=24)
     plt.grid(axis='y', alpha=0.3, linestyle='--')
     plt.tight_layout()
     plt.savefig("plots/v1/station_durations.png", dpi=300)
