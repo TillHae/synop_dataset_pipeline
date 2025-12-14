@@ -1,12 +1,9 @@
 import requests
 import os
-import json
 
 from bs4 import BeautifulSoup
 from pathlib import Path
 from zipfile import ZipFile
-from io import BytesIO
-from time import sleep
 
 pars = ["air_temperature", "extreme_temperature", "extreme_wind", "precipitation", "solar", "wind"]
 folds = ["air_temp", "ex_temp", "ex_wind", "precip", "solar", "wind"]

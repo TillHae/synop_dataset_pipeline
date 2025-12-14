@@ -1,7 +1,6 @@
 import os
 from multiprocessing import Pool, cpu_count
 import re
-import pickle
 from datetime import datetime as dt, timedelta, time
 
 import pandas as pd

@@ -6,7 +6,6 @@ from datetime import datetime
 
 import pandas as pd
 import numpy as np
-import xarray as xr
 
 def process_file(file_path, year):
     with open(file_path, "rb") as station:

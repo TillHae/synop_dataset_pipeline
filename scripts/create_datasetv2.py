@@ -1,7 +1,7 @@
 import os
 import warnings
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple
 
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
@@ -10,7 +10,6 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 from scipy import stats
-from statsmodels.tsa.stattools import adfuller, kpss
 
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -34,7 +33,7 @@ class NumericalChecker:
             'TN5_10': (-50, 45),  # Min temperature at 5cm (ground can be colder)
             'TT_10': (-50, 45),   # Air temperature (10-min)
             'TM5_10': (-50, 45),  # Temperature at 5cm
-            'TD_10': (-15, 35),   # Dew point temperature
+            'TD_10': (-20, 40),   # Dew point temperature
             
             # Wind variables (m/s)
             # Germany: Typical max gusts ~40 m/s, extreme storms ~50 m/s
