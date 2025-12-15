@@ -642,7 +642,7 @@ class NumericalChecker:
         plt.bar(range(len(vars_sorted)), values, color=colors)
         plt.xticks(range(len(vars_sorted)), vars_sorted, rotation=45, ha='right')
         plt.xlabel('Variable', fontsize=24)
-        plt.ylabel('Coefficient of Variation (Mean)', fontsize=24)
+        plt.ylabel('Coefficient of Variation', fontsize=24)
         # plt.title('Inter-Annual Consistency: CV of Yearly Means', fontsize=14, fontweight='bold')
         plt.axhline(y=0.15, color='orange', linestyle='--', alpha=0.5, label='Moderate variability')
         plt.axhline(y=0.30, color='red', linestyle='--', alpha=0.5, label='High variability')
@@ -1147,7 +1147,7 @@ class NumericalApplier:
         
         plt.figure(figsize=(12, 6))
         plt.bar(range(len(vars_sorted)), values, color='#d73027')
-        plt.xticks(range(len(vars_sorted)), vars_sorted, rotation=45, ha='right', fontsize=24)
+        plt.xticks(range(len(vars_sorted)), vars_sorted, rotation=45, ha='right')
         plt.xlabel('Variable', fontsize=24)
         plt.ylabel('Data Removed (%)', fontsize=24)
         # plt.title('Impact of Data Cleaning: Percentage of Values Removed per Variable', fontsize=14, fontweight='bold')
