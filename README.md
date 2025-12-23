@@ -2,6 +2,8 @@
 
 Complete pipeline for processing German Weather Service (DWD) SYNOP 10-minute meteorological data into high-quality, gap-filled NetCDF datasets.
 
+**Executing the full pipeline requires approximately 1 TB of disk space. For reliable and efficient performance, a minimum of 64 GB of RAM and 32 CPU cores is recommended.**
+
 ## Pipeline Overview
 
 ```
