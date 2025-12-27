@@ -14,8 +14,7 @@ data/*
 *.slurm
 
 test.py
-paper/*
-!paper/Hauer_3622274_seminarthesis_v03.pdf
+paper
 
 # macOS system files
 .DS_Store
