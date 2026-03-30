@@ -95,16 +95,6 @@ def delete_duplicates(fold, dups):
 
     print(f"{fold} done!")
 
-print("starting duplicate check")
-all_dups = {}
-for fold in folds:
-    dups = check_duplicates(fold)
-    all_dups[fold] = dups
-    delete_duplicates(fold, dups)
-
-plot_duplicates(all_dups)
-
-
 # check missing
 
 def check_missing(fold):
@@ -184,15 +174,6 @@ def create_missing(fold, missing):
                 )
 
     print(f"{fold} done!")
-
-total_missing = {}
-for fold in folds:
-    missing = check_missing(fold)
-    total_missing[fold] = missing
-    create_missing(fold, missing)
-
-plot_missing(total_missing)
-
 
 # fix incorrect file content
 
@@ -536,6 +517,23 @@ def plot_concatenations(concat_stats):
     plt.tight_layout()
     plt.savefig("plots/v1/concatenated_files_pct.png", dpi=300)
     plt.close()
+
+print("starting duplicate check")
+all_dups = {}
+for fold in folds:
+    dups = check_duplicates(fold)
+    all_dups[fold] = dups
+    delete_duplicates(fold, dups)
+
+plot_duplicates(all_dups)
+
+total_missing = {}
+for fold in folds:
+    missing = check_missing(fold)
+    total_missing[fold] = missing
+    create_missing(fold, missing)
+
+plot_missing(total_missing)
 
 print("starting concatenation of station files...")
 concat_stats = {}
