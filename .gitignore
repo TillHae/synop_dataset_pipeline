@@ -3,7 +3,7 @@
 venv/*
 
 plots/*
-data/*
+data
 
 *cache*
 *.aux
