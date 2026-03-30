@@ -6,6 +6,7 @@ from datetime import datetime
 
 import pandas as pd
 import numpy as np
+import xarray as xr
 
 def process_file(file_path, year):
     with open(file_path, "rb") as station:
@@ -82,7 +83,23 @@ def process_year(year, metadata):
     for col in cols_to_check:
         merged[col] = pd.to_numeric(merged[col], errors="coerce")
 
-    ds = merged.set_index(["station_id", "time"]).to_xarray()
+    # Geo variables are station-level properties (constant over time).
+    # latitude/longitude are true xarray coordinates; height is geoinfo (a 1D data variable).
+    geo_vars = ['height', 'latitude', 'longitude']
+    ts_cols = [c for c in merged.columns if c not in geo_vars]
+    ds = merged[ts_cols].set_index(["station_id", "time"]).to_xarray()
+
+    # Take the first (and only meaningful) value per station.
+    station_geo = merged.groupby("station_id")[geo_vars].first()
+
+    # latitude and longitude as proper xarray coordinates (1D on station_id).
+    for var in ['latitude', 'longitude']:
+        values = station_geo[var].reindex(ds.station_id.values).values
+        ds = ds.assign_coords({var: xr.DataArray(values, dims=["station_id"])})
+
+    # height as a geoinfo: a 1D data variable on station_id only (not time-varying).
+    height_values = station_geo['height'].reindex(ds.station_id.values).values
+    ds['height'] = xr.DataArray(height_values, dims=["station_id"])
 
     os.makedirs("data/datasetv1", exist_ok=True)
     ds.to_netcdf(f"data/datasetv1/{year}.nc")
